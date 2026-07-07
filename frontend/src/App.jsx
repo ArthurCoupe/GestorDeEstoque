@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Loader2 } from "lucide-react";
 import toast, { Toaster } from "react-hot-toast";
 import {
   Bar,
@@ -27,6 +28,15 @@ const currencyFormatter = new Intl.NumberFormat("pt-BR", {
   style: "currency",
   currency: "BRL",
 });
+
+function LoadingLabel({ text }) {
+  return (
+    <span className="inline-flex items-center justify-center gap-2">
+      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+      {text}
+    </span>
+  );
+}
 
 function getStatus(produto) {
   if (produto.quantidade_atual === 0) {
@@ -184,7 +194,7 @@ function FormProduto({ onSaved }) {
           type="submit"
           disabled={loading}
         >
-          {loading ? "Salvando..." : "Cadastrar produto"}
+          {loading ? <LoadingLabel text="Salvando..." /> : "Cadastrar produto"}
         </button>
       </div>
     </form>
@@ -306,7 +316,11 @@ function FormMovimentacao({ produtos, onSaved }) {
           type="submit"
           disabled={loading || produtos.length === 0}
         >
-          {loading ? "Registrando..." : "Registrar movimentacao"}
+          {loading ? (
+            <LoadingLabel text="Registrando..." />
+          ) : (
+            "Registrar movimentacao"
+          )}
         </button>
       </div>
     </form>
@@ -691,7 +705,7 @@ function EditarProdutoModal({ onClose, onSaved, produto }) {
               type="submit"
               disabled={loading}
             >
-              {loading ? "Salvando..." : "Salvar"}
+              {loading ? <LoadingLabel text="Salvando..." /> : "Salvar"}
             </button>
           </div>
         </div>
@@ -737,7 +751,7 @@ function ExcluirProdutoModal({ onClose, onConfirm, produto }) {
             onClick={handleConfirm}
             disabled={loading}
           >
-            {loading ? "Excluindo..." : "Excluir"}
+            {loading ? <LoadingLabel text="Excluindo..." /> : "Excluir"}
           </button>
         </div>
       </div>
@@ -814,7 +828,7 @@ function LoginPage({ onLogin }) {
             type="submit"
             disabled={loading}
           >
-            {loading ? "Entrando..." : "Entrar"}
+            {loading ? <LoadingLabel text="Entrando..." /> : "Entrar"}
           </button>
         </div>
       </form>
@@ -836,6 +850,7 @@ function LoginPage({ onLogin }) {
 export default function App() {
   const [authToken, setAuthTokenState] = useState(() => getAuthToken());
   const [erroGlobal, setErroGlobal] = useState("");
+  const [isLoadingDados, setIsLoadingDados] = useState(false);
   const [movimentacoes, setMovimentacoes] = useState([]);
   const [produtoEditando, setProdutoEditando] = useState(null);
   const [produtoExcluindo, setProdutoExcluindo] = useState(null);
@@ -855,6 +870,7 @@ export default function App() {
       return;
     }
 
+    setIsLoadingDados(true);
     try {
       const [produtosData, movimentacoesData] = await Promise.all([
         listarProdutos(),
@@ -874,6 +890,8 @@ export default function App() {
         "Nao foi possivel conectar ao backend em http://localhost:8000.";
       setErroGlobal(message);
       toast.error(message, { id: "backend-offline" });
+    } finally {
+      setIsLoadingDados(false);
     }
   }, [authToken, handleLogout]);
 
@@ -949,6 +967,13 @@ export default function App() {
         {erroGlobal && (
           <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
             {erroGlobal}
+          </div>
+        )}
+
+        {isLoadingDados && (
+          <div className="inline-flex items-center gap-2 rounded-lg border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm font-medium text-cyan-700">
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            Atualizando dados do estoque...
           </div>
         )}
 
