@@ -355,7 +355,7 @@ def listar_movimentacoes(_usuario: UsuarioOut = Depends(get_current_user)):
                     COALESCE(p.nome, 'Produto removido') AS produto_nome,
                     m.tipo,
                     m.quantidade,
-                    DATE_FORMAT(m.criado_em, '%%Y-%%m-%%d %%H:%%i:%%s') AS data_hora
+                    DATE_FORMAT(m.criado_em, '%Y-%m-%d %H:%i:%s') AS data_hora
                 FROM movimentacao m
                 LEFT JOIN produto p ON p.id = m.produto_id
                 ORDER BY m.id DESC
