@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import toast, { Toaster } from "react-hot-toast";
 import {
   Bar,
   BarChart,
@@ -8,10 +9,11 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { ToastContainer, toast } from "react-toastify";
-import "react-toastify/dist/ReactToastify.css";
 import {
   cadastrarProduto,
+  editarProduto,
+  excluirProduto,
+  listarMovimentacoes,
   listarProdutos,
   registrarMovimentacao,
 } from "./api";
@@ -41,6 +43,49 @@ function getStatus(produto) {
     label: "OK",
     classes: "bg-emerald-50 text-emerald-700 ring-emerald-200",
   };
+}
+
+function formatDate(value) {
+  if (!value) return "-";
+
+  const parsed = new Date(value.replace(" ", "T"));
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat("pt-BR", {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(parsed);
+}
+
+function csvEscape(value) {
+  const text = String(value ?? "");
+  return `"${text.replaceAll('"', '""')}"`;
+}
+
+function exportarProdutosCsv(produtos) {
+  const headers = ["ID", "Produto", "Preco", "Estoque", "Status"];
+  const rows = produtos.map((produto) => [
+    produto.id,
+    produto.nome,
+    produto.preco,
+    produto.quantidade_atual,
+    getStatus(produto).label,
+  ]);
+  const csv = [headers, ...rows]
+    .map((row) => row.map(csvEscape).join(","))
+    .join("\n");
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `relatorio-estoque-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function CardTitle({ eyebrow, title }) {
@@ -363,7 +408,7 @@ function DashboardEstoque({ produtos }) {
   );
 }
 
-function TabelaProdutos({ produtos }) {
+function TabelaProdutos({ produtos, onDelete, onEdit }) {
   const [busca, setBusca] = useState("");
 
   const produtosFiltrados = useMemo(() => {
@@ -378,20 +423,41 @@ function TabelaProdutos({ produtos }) {
     );
   }, [busca, produtos]);
 
+  function handleExport() {
+    if (produtos.length === 0) {
+      toast.error("Nao ha produtos para exportar.");
+      return;
+    }
+
+    exportarProdutosCsv(produtos);
+    toast.success("Relatorio CSV exportado.");
+  }
+
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <CardTitle eyebrow="Inventario" title="Estoque atual" />
 
-        <label className="w-full lg:max-w-xs">
-          <span className="sr-only">Buscar produto</span>
-          <input
-            className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
-            value={busca}
-            onChange={(event) => setBusca(event.target.value)}
-            placeholder="Buscar por nome..."
-          />
-        </label>
+        <div className="flex w-full flex-col gap-2 sm:flex-row lg:max-w-xl">
+          <button
+            className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            type="button"
+            onClick={handleExport}
+            disabled={produtos.length === 0}
+          >
+            Exportar Relatorio (CSV)
+          </button>
+
+          <label className="w-full">
+            <span className="sr-only">Buscar produto</span>
+            <input
+              className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
+              value={busca}
+              onChange={(event) => setBusca(event.target.value)}
+              placeholder="Buscar por nome..."
+            />
+          </label>
+        </div>
       </div>
 
       <div className="mt-1 overflow-x-auto">
@@ -421,6 +487,9 @@ function TabelaProdutos({ produtos }) {
                 </th>
                 <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Status
+                </th>
+                <th className="px-3 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Acoes
                 </th>
               </tr>
             </thead>
@@ -452,6 +521,24 @@ function TabelaProdutos({ produtos }) {
                         {status.label}
                       </span>
                     </td>
+                    <td className="whitespace-nowrap px-3 py-3">
+                      <div className="flex justify-end gap-2">
+                        <button
+                          className="rounded-md border border-cyan-200 bg-cyan-50 px-2.5 py-1.5 text-xs font-semibold text-cyan-700 transition hover:bg-cyan-100"
+                          type="button"
+                          onClick={() => onEdit(produto)}
+                        >
+                          Editar
+                        </button>
+                        <button
+                          className="rounded-md border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs font-semibold text-red-700 transition hover:bg-red-100"
+                          type="button"
+                          onClick={() => onDelete(produto)}
+                        >
+                          Excluir
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 );
               })}
@@ -463,22 +550,231 @@ function TabelaProdutos({ produtos }) {
   );
 }
 
+function HistoricoMovimentacoes({ movimentacoes }) {
+  return (
+    <section
+      className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm"
+      id="historico"
+    >
+      <CardTitle eyebrow="Auditoria" title="Historico de movimentacoes" />
+
+      <div className="overflow-x-auto">
+        {movimentacoes.length === 0 ? (
+          <div className="flex min-h-36 items-center justify-center rounded-md border border-dashed border-slate-300 bg-slate-50 px-4 text-center text-sm text-slate-500">
+            Nenhuma movimentacao registrada ainda.
+          </div>
+        ) : (
+          <table className="min-w-full divide-y divide-slate-200">
+            <thead>
+              <tr>
+                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Data/Hora
+                </th>
+                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Produto
+                </th>
+                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Tipo
+                </th>
+                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Quantidade
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {movimentacoes.map((movimentacao) => (
+                <tr
+                  className="transition hover:bg-slate-50"
+                  key={movimentacao.id}
+                >
+                  <td className="whitespace-nowrap px-3 py-3 text-sm text-slate-600">
+                    {formatDate(movimentacao.data_hora)}
+                  </td>
+                  <td className="min-w-52 px-3 py-3 text-sm font-semibold text-slate-950">
+                    {movimentacao.produto_nome}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-3">
+                    <span
+                      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${
+                        movimentacao.tipo === "entrada"
+                          ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
+                          : "bg-red-50 text-red-700 ring-red-200"
+                      }`}
+                    >
+                      {movimentacao.tipo === "entrada" ? "Entrada" : "Saida"}
+                    </span>
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-3 text-sm font-semibold text-slate-950">
+                    {movimentacao.quantidade}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function EditarProdutoModal({ onClose, onSaved, produto }) {
+  const [nome, setNome] = useState(produto.nome);
+  const [preco, setPreco] = useState(String(produto.preco));
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setLoading(true);
+
+    try {
+      await editarProduto(produto.id, {
+        nome: nome.trim(),
+        preco: parseFloat(preco),
+      });
+      toast.success("Produto atualizado com sucesso.");
+      await onSaved();
+      onClose();
+    } catch (err) {
+      toast.error(err.message || "Nao foi possivel atualizar o produto.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/50 px-4">
+      <form
+        className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-xl"
+        onSubmit={handleSubmit}
+      >
+        <CardTitle eyebrow="Edicao" title="Editar produto" />
+
+        <div className="space-y-4">
+          <label className="block">
+            <span className="text-sm font-medium text-slate-700">Nome</span>
+            <input
+              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
+              value={nome}
+              onChange={(event) => setNome(event.target.value)}
+              required
+            />
+          </label>
+
+          <label className="block">
+            <span className="text-sm font-medium text-slate-700">Preco</span>
+            <input
+              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
+              type="number"
+              step="0.01"
+              min="0.01"
+              value={preco}
+              onChange={(event) => setPreco(event.target.value)}
+              required
+            />
+          </label>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+              type="button"
+              onClick={onClose}
+              disabled={loading}
+            >
+              Cancelar
+            </button>
+            <button
+              className="rounded-md bg-cyan-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-cyan-800 disabled:cursor-not-allowed disabled:opacity-60"
+              type="submit"
+              disabled={loading}
+            >
+              {loading ? "Salvando..." : "Salvar"}
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function ExcluirProdutoModal({ onClose, onConfirm, produto }) {
+  const [loading, setLoading] = useState(false);
+
+  async function handleConfirm() {
+    setLoading(true);
+    try {
+      await onConfirm(produto);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/50 px-4">
+      <div className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-xl">
+        <CardTitle eyebrow="Exclusao" title="Excluir produto" />
+        <p className="text-sm text-slate-600">
+          Esta acao remove o produto{" "}
+          <span className="font-semibold text-slate-950">{produto.nome}</span> e
+          suas movimentacoes vinculadas.
+        </p>
+
+        <div className="mt-6 flex justify-end gap-2">
+          <button
+            className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+            type="button"
+            onClick={onClose}
+            disabled={loading}
+          >
+            Cancelar
+          </button>
+          <button
+            className="rounded-md bg-red-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-60"
+            type="button"
+            onClick={handleConfirm}
+            disabled={loading}
+          >
+            {loading ? "Excluindo..." : "Excluir"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
-  const [produtos, setProdutos] = useState([]);
   const [erroGlobal, setErroGlobal] = useState("");
+  const [movimentacoes, setMovimentacoes] = useState([]);
+  const [produtoEditando, setProdutoEditando] = useState(null);
+  const [produtoExcluindo, setProdutoExcluindo] = useState(null);
+  const [produtos, setProdutos] = useState([]);
 
   const carregar = useCallback(async () => {
     try {
-      const data = await listarProdutos();
-      setProdutos(data);
+      const [produtosData, movimentacoesData] = await Promise.all([
+        listarProdutos(),
+        listarMovimentacoes(),
+      ]);
+      setProdutos(produtosData);
+      setMovimentacoes(movimentacoesData);
       setErroGlobal("");
     } catch {
       const message =
         "Nao foi possivel conectar ao backend em http://localhost:8000.";
       setErroGlobal(message);
-      toast.error(message, { toastId: "backend-offline" });
+      toast.error(message, { id: "backend-offline" });
     }
   }, []);
+
+  async function handleExcluirProduto(produto) {
+    try {
+      await excluirProduto(produto.id);
+      toast.success("Produto excluido com sucesso.");
+      await carregar();
+      setProdutoExcluindo(null);
+    } catch (err) {
+      toast.error(err.message || "Nao foi possivel excluir o produto.");
+    }
+  }
 
   useEffect(() => {
     carregar();
@@ -516,6 +812,12 @@ export default function App() {
             >
               Operacoes
             </a>
+            <a
+              className="rounded-md px-3 py-2 text-slate-600 hover:bg-slate-100 hover:text-slate-950"
+              href="#historico"
+            >
+              Historico
+            </a>
           </nav>
         </div>
       </header>
@@ -537,19 +839,42 @@ export default function App() {
             <FormMovimentacao produtos={produtos} onSaved={carregar} />
           </aside>
 
-          <div id="produtos">
-            <TabelaProdutos produtos={produtos} />
+          <div className="grid gap-6" id="produtos">
+            <TabelaProdutos
+              produtos={produtos}
+              onDelete={setProdutoExcluindo}
+              onEdit={setProdutoEditando}
+            />
+            <HistoricoMovimentacoes movimentacoes={movimentacoes} />
           </div>
         </div>
       </main>
 
-      <ToastContainer
-        autoClose={3200}
-        closeOnClick
-        newestOnTop
-        pauseOnHover
+      {produtoEditando && (
+        <EditarProdutoModal
+          produto={produtoEditando}
+          onClose={() => setProdutoEditando(null)}
+          onSaved={carregar}
+        />
+      )}
+
+      {produtoExcluindo && (
+        <ExcluirProdutoModal
+          produto={produtoExcluindo}
+          onClose={() => setProdutoExcluindo(null)}
+          onConfirm={handleExcluirProduto}
+        />
+      )}
+
+      <Toaster
         position="top-right"
-        theme="colored"
+        toastOptions={{
+          duration: 3200,
+          style: {
+            borderRadius: "8px",
+            fontSize: "14px",
+          },
+        }}
       />
     </div>
   );
