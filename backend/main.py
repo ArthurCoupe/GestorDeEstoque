@@ -113,6 +113,30 @@ def init_db() -> None:
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """
             )
+            cursor.execute("SHOW COLUMNS FROM produto")
+            produto_columns = {column["Field"] for column in cursor.fetchall()}
+
+            if "preco" not in produto_columns:
+                cursor.execute(
+                    "ALTER TABLE produto "
+                    "ADD COLUMN preco DECIMAL(10, 2) NOT NULL DEFAULT 0"
+                )
+
+                if "preco_venda" in produto_columns:
+                    cursor.execute("UPDATE produto SET preco = preco_venda")
+
+            if "preco_custo" in produto_columns:
+                cursor.execute(
+                    "ALTER TABLE produto "
+                    "MODIFY preco_custo DOUBLE NOT NULL DEFAULT 0"
+                )
+
+            if "preco_venda" in produto_columns:
+                cursor.execute(
+                    "ALTER TABLE produto "
+                    "MODIFY preco_venda DOUBLE NOT NULL DEFAULT 0"
+                )
+
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS movimentacao (
@@ -129,6 +153,24 @@ def init_db() -> None:
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """
             )
+            cursor.execute("SHOW COLUMNS FROM movimentacao")
+            movimentacao_columns = {column["Field"] for column in cursor.fetchall()}
+
+            if "criado_em" not in movimentacao_columns:
+                cursor.execute(
+                    "ALTER TABLE movimentacao "
+                    "ADD COLUMN criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                )
+
+                if "data_hora" in movimentacao_columns:
+                    cursor.execute("UPDATE movimentacao SET criado_em = data_hora")
+
+            if "valor_total" in movimentacao_columns:
+                cursor.execute(
+                    "ALTER TABLE movimentacao "
+                    "MODIFY valor_total DOUBLE NOT NULL DEFAULT 0"
+                )
+
             cursor.execute("SELECT COUNT(*) AS total FROM usuarios")
             total_usuarios = cursor.fetchone()["total"]
 
