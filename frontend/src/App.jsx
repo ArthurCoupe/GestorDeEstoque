@@ -11,11 +11,15 @@ import {
 } from "recharts";
 import {
   cadastrarProduto,
+  clearAuthToken,
   editarProduto,
   excluirProduto,
+  getAuthToken,
   listarMovimentacoes,
   listarProdutos,
+  loginUsuario,
   registrarMovimentacao,
+  setAuthToken,
 } from "./api";
 import "./App.css";
 
@@ -741,14 +745,116 @@ function ExcluirProdutoModal({ onClose, onConfirm, produto }) {
   );
 }
 
+function LoginPage({ onLogin }) {
+  const [loading, setLoading] = useState(false);
+  const [password, setPassword] = useState("");
+  const [username, setUsername] = useState("admin");
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setLoading(true);
+
+    try {
+      const data = await loginUsuario({ username, password });
+      setAuthToken(data.access_token);
+      toast.success("Login realizado com sucesso.");
+      onLogin(data.access_token);
+    } catch (err) {
+      toast.error(err.message || "Nao foi possivel fazer login.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-slate-100 px-4 py-10">
+      <form
+        className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-8 shadow-sm"
+        onSubmit={handleSubmit}
+      >
+        <div className="mb-8">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-700">
+            GestorDeEstoque
+          </p>
+          <h1 className="mt-2 text-2xl font-semibold text-slate-950">
+            Acessar painel
+          </h1>
+          <p className="mt-2 text-sm text-slate-500">
+            Entre com seu usuario para gerenciar o estoque.
+          </p>
+        </div>
+
+        <div className="space-y-4">
+          <label className="block">
+            <span className="text-sm font-medium text-slate-700">Usuario</span>
+            <input
+              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
+              value={username}
+              onChange={(event) => setUsername(event.target.value)}
+              required
+              autoComplete="username"
+            />
+          </label>
+
+          <label className="block">
+            <span className="text-sm font-medium text-slate-700">Senha</span>
+            <input
+              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              required
+              autoComplete="current-password"
+              placeholder="admin123"
+            />
+          </label>
+
+          <button
+            className="inline-flex w-full items-center justify-center rounded-md bg-cyan-700 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-cyan-800 disabled:cursor-not-allowed disabled:opacity-60"
+            type="submit"
+            disabled={loading}
+          >
+            {loading ? "Entrando..." : "Entrar"}
+          </button>
+        </div>
+      </form>
+
+      <Toaster
+        position="top-right"
+        toastOptions={{
+          duration: 3200,
+          style: {
+            borderRadius: "8px",
+            fontSize: "14px",
+          },
+        }}
+      />
+    </div>
+  );
+}
+
 export default function App() {
+  const [authToken, setAuthTokenState] = useState(() => getAuthToken());
   const [erroGlobal, setErroGlobal] = useState("");
   const [movimentacoes, setMovimentacoes] = useState([]);
   const [produtoEditando, setProdutoEditando] = useState(null);
   const [produtoExcluindo, setProdutoExcluindo] = useState(null);
   const [produtos, setProdutos] = useState([]);
 
+  const handleLogout = useCallback(() => {
+    clearAuthToken();
+    setAuthTokenState(null);
+    setProdutos([]);
+    setMovimentacoes([]);
+    setErroGlobal("");
+    toast.success("Sessao encerrada.");
+  }, []);
+
   const carregar = useCallback(async () => {
+    if (!authToken) {
+      return;
+    }
+
     try {
       const [produtosData, movimentacoesData] = await Promise.all([
         listarProdutos(),
@@ -757,13 +863,19 @@ export default function App() {
       setProdutos(produtosData);
       setMovimentacoes(movimentacoesData);
       setErroGlobal("");
-    } catch {
+    } catch (err) {
+      if (err.status === 401 || err.status === 403) {
+        handleLogout();
+        toast.error("Sessao expirada. Faca login novamente.");
+        return;
+      }
+
       const message =
         "Nao foi possivel conectar ao backend em http://localhost:8000.";
       setErroGlobal(message);
       toast.error(message, { id: "backend-offline" });
     }
-  }, []);
+  }, [authToken, handleLogout]);
 
   async function handleExcluirProduto(produto) {
     try {
@@ -779,6 +891,10 @@ export default function App() {
   useEffect(() => {
     carregar();
   }, [carregar]);
+
+  if (!authToken) {
+    return <LoginPage onLogin={setAuthTokenState} />;
+  }
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-950">
@@ -818,6 +934,13 @@ export default function App() {
             >
               Historico
             </a>
+            <button
+              className="rounded-md border border-slate-300 px-3 py-2 text-slate-600 transition hover:bg-slate-100 hover:text-slate-950"
+              type="button"
+              onClick={handleLogout}
+            >
+              Sair
+            </button>
           </nav>
         </div>
       </header>

@@ -1,4 +1,17 @@
 const API_BASE = "http://localhost:8000";
+const TOKEN_KEY = "gestor_estoque_token";
+
+export function getAuthToken() {
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+export function setAuthToken(token) {
+  localStorage.setItem(TOKEN_KEY, token);
+}
+
+export function clearAuthToken() {
+  localStorage.removeItem(TOKEN_KEY);
+}
 
 async function getErrorMessage(res, fallback) {
   try {
@@ -9,61 +22,71 @@ async function getErrorMessage(res, fallback) {
   }
 }
 
-export async function listarProdutos() {
-  const res = await fetch(`${API_BASE}/produtos`);
-  if (!res.ok) throw new Error("Erro ao listar produtos");
+async function apiRequest(path, options = {}) {
+  const token = getAuthToken();
+  const headers = {
+    ...(options.body ? { "Content-Type": "application/json" } : {}),
+    ...(options.headers || {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers,
+  });
+
+  if (!res.ok) {
+    const error = new Error(await getErrorMessage(res, "Erro na requisicao"));
+    error.status = res.status;
+    throw error;
+  }
+
+  if (res.status === 204) {
+    return null;
+  }
+
   return res.json();
+}
+
+export async function loginUsuario(credentials) {
+  return apiRequest("/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(credentials),
+  });
+}
+
+export async function listarProdutos() {
+  return apiRequest("/produtos");
 }
 
 export async function cadastrarProduto(produto) {
-  const res = await fetch(`${API_BASE}/produtos`, {
+  return apiRequest("/produtos", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(produto),
   });
-  if (!res.ok) {
-    throw new Error(await getErrorMessage(res, "Erro ao cadastrar produto"));
-  }
-  return res.json();
 }
 
 export async function editarProduto(id, produto) {
-  const res = await fetch(`${API_BASE}/produtos/${id}`, {
+  return apiRequest(`/produtos/${id}`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(produto),
   });
-  if (!res.ok) {
-    throw new Error(await getErrorMessage(res, "Erro ao editar produto"));
-  }
-  return res.json();
 }
 
 export async function excluirProduto(id) {
-  const res = await fetch(`${API_BASE}/produtos/${id}`, {
+  return apiRequest(`/produtos/${id}`, {
     method: "DELETE",
   });
-  if (!res.ok) {
-    throw new Error(await getErrorMessage(res, "Erro ao excluir produto"));
-  }
 }
 
 export async function listarMovimentacoes() {
-  const res = await fetch(`${API_BASE}/movimentacoes`);
-  if (!res.ok) throw new Error("Erro ao listar movimentacoes");
-  return res.json();
+  return apiRequest("/movimentacoes");
 }
 
 export async function registrarMovimentacao(mov) {
-  const res = await fetch(`${API_BASE}/movimentacoes`, {
+  return apiRequest("/movimentacoes", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(mov),
   });
-  if (!res.ok) {
-    throw new Error(
-      await getErrorMessage(res, "Erro ao registrar movimentacao"),
-    );
-  }
-  return res.json();
 }
