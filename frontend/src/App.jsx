@@ -1,6 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import toast, { Toaster } from "react-hot-toast";
+import {
+  BrowserRouter,
+  Navigate,
+  NavLink,
+  Route,
+  Routes,
+  useLocation,
+} from "react-router-dom";
 import {
   Bar,
   BarChart,
@@ -73,6 +81,129 @@ function formatDate(value) {
   }).format(parsed);
 }
 
+function normalizarBusca(value) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function criarIndiceProdutosPorNome(produtos) {
+  const indice = new Map();
+
+  function adicionarChave(chave, produtoId) {
+    if (!chave) return;
+
+    const bucket = indice.get(chave) ?? new Set();
+    bucket.add(produtoId);
+    indice.set(chave, bucket);
+  }
+
+  produtos.forEach((produto) => {
+    const nomeNormalizado = normalizarBusca(produto.nome);
+    const chaves = new Set([nomeNormalizado]);
+    const partes = nomeNormalizado.split(/\s+/).filter(Boolean);
+
+    partes.forEach((parte) => {
+      for (let i = 1; i <= parte.length; i += 1) {
+        chaves.add(parte.slice(0, i));
+      }
+    });
+
+    for (let i = 1; i <= nomeNormalizado.length; i += 1) {
+      chaves.add(nomeNormalizado.slice(0, i));
+    }
+
+    chaves.forEach((chave) => adicionarChave(chave, produto.id));
+  });
+
+  return indice;
+}
+
+function intersectarIds(idsAtuais, proximosIds) {
+  if (!idsAtuais) {
+    return new Set(proximosIds);
+  }
+
+  return new Set([...idsAtuais].filter((id) => proximosIds.has(id)));
+}
+
+function useRouteFocus() {
+  const location = useLocation();
+  const mainRef = useRef(null);
+
+  useEffect(() => {
+    mainRef.current?.focus();
+  }, [location.pathname]);
+
+  return mainRef;
+}
+
+function useDialogFocusTrap(onClose) {
+  const dialogRef = useRef(null);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    const previousActiveElement = document.activeElement;
+    const focusableSelector =
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+    if (!dialog) return undefined;
+
+    const getFocusableElements = () =>
+      Array.from(dialog.querySelectorAll(focusableSelector)).filter(
+        (element) => !element.hasAttribute("disabled"),
+      );
+
+    const [firstFocusable] = getFocusableElements();
+    (firstFocusable ?? dialog).focus();
+
+    function handleKeyDown(event) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+
+      if (event.key !== "Tab") {
+        return;
+      }
+
+      const focusableElements = getFocusableElements();
+      const firstElement = focusableElements[0];
+      const lastElement = focusableElements[focusableElements.length - 1];
+
+      if (!firstElement || !lastElement) {
+        event.preventDefault();
+        return;
+      }
+
+      if (event.shiftKey && document.activeElement === firstElement) {
+        event.preventDefault();
+        lastElement.focus();
+      }
+
+      if (!event.shiftKey && document.activeElement === lastElement) {
+        event.preventDefault();
+        firstElement.focus();
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+
+      if (previousActiveElement instanceof HTMLElement) {
+        previousActiveElement.focus();
+      }
+    };
+  }, [onClose]);
+
+  return dialogRef;
+}
+
 function csvEscape(value) {
   const text = String(value ?? "");
   return `"${text.replaceAll('"', '""')}"`;
@@ -102,13 +233,15 @@ function exportarProdutosCsv(produtos) {
   URL.revokeObjectURL(url);
 }
 
-function CardTitle({ eyebrow, title }) {
+function CardTitle({ eyebrow, title, titleId }) {
   return (
     <div className="mb-5">
       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
         {eyebrow}
       </p>
-      <h2 className="mt-1 text-lg font-semibold text-slate-950">{title}</h2>
+      <h2 className="mt-1 text-lg font-semibold text-slate-950" id={titleId}>
+        {title}
+      </h2>
     </div>
   );
 }
@@ -150,9 +283,10 @@ function FormProduto({ onSaved }) {
       <CardTitle eyebrow="Cadastro" title="Novo produto" />
 
       <div className="space-y-4">
-        <label className="block">
+        <label className="block" htmlFor="produto-nome">
           <span className="text-sm font-medium text-slate-700">Nome</span>
           <input
+            id="produto-nome"
             className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
             value={nome}
             onChange={(event) => setNome(event.target.value)}
@@ -161,9 +295,10 @@ function FormProduto({ onSaved }) {
           />
         </label>
 
-        <label className="block">
+        <label className="block" htmlFor="produto-preco">
           <span className="text-sm font-medium text-slate-700">Preco</span>
           <input
+            id="produto-preco"
             className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
             type="number"
             step="0.01"
@@ -175,11 +310,12 @@ function FormProduto({ onSaved }) {
           />
         </label>
 
-        <label className="block">
+        <label className="block" htmlFor="produto-quantidade">
           <span className="text-sm font-medium text-slate-700">
             Quantidade inicial
           </span>
           <input
+            id="produto-quantidade"
             className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
             type="number"
             min="0"
@@ -190,7 +326,7 @@ function FormProduto({ onSaved }) {
         </label>
 
         <button
-          className="inline-flex w-full items-center justify-center rounded-md bg-cyan-700 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-cyan-800 disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex w-full items-center justify-center rounded-md bg-cyan-700 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-cyan-800 focus:outline-none focus:ring-4 focus:ring-cyan-100 disabled:cursor-not-allowed disabled:opacity-60"
           type="submit"
           disabled={loading}
         >
@@ -240,9 +376,10 @@ function FormMovimentacao({ produtos, onSaved }) {
       <CardTitle eyebrow="Estoque" title="Movimentacao" />
 
       <div className="space-y-4">
-        <label className="block">
+        <label className="block" htmlFor="movimentacao-produto">
           <span className="text-sm font-medium text-slate-700">Produto</span>
           <select
+            id="movimentacao-produto"
             className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
             value={produtoId}
             onChange={(event) => setProdutoId(event.target.value)}
@@ -261,7 +398,7 @@ function FormMovimentacao({ produtos, onSaved }) {
           <legend className="text-sm font-medium text-slate-700">Tipo</legend>
           <div className="mt-2 grid grid-cols-2 gap-2">
             <label
-              className={`flex cursor-pointer items-center justify-center rounded-md border px-3 py-2 text-sm font-semibold transition ${
+              className={`flex cursor-pointer items-center justify-center rounded-md border px-3 py-2 text-sm font-semibold transition focus-within:ring-4 focus-within:ring-emerald-100 ${
                 tipo === "entrada"
                   ? "border-emerald-500 bg-emerald-50 text-emerald-700"
                   : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
@@ -279,7 +416,7 @@ function FormMovimentacao({ produtos, onSaved }) {
             </label>
 
             <label
-              className={`flex cursor-pointer items-center justify-center rounded-md border px-3 py-2 text-sm font-semibold transition ${
+              className={`flex cursor-pointer items-center justify-center rounded-md border px-3 py-2 text-sm font-semibold transition focus-within:ring-4 focus-within:ring-red-100 ${
                 tipo === "saida"
                   ? "border-red-500 bg-red-50 text-red-700"
                   : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
@@ -298,9 +435,10 @@ function FormMovimentacao({ produtos, onSaved }) {
           </div>
         </fieldset>
 
-        <label className="block">
+        <label className="block" htmlFor="movimentacao-quantidade">
           <span className="text-sm font-medium text-slate-700">Quantidade</span>
           <input
+            id="movimentacao-quantidade"
             className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
             type="number"
             min="1"
@@ -312,7 +450,7 @@ function FormMovimentacao({ produtos, onSaved }) {
         </label>
 
         <button
-          className="inline-flex w-full items-center justify-center rounded-md bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex w-full items-center justify-center rounded-md bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 focus:outline-none focus:ring-4 focus:ring-cyan-100 disabled:cursor-not-allowed disabled:opacity-60"
           type="submit"
           disabled={loading || produtos.length === 0}
         >
@@ -428,18 +566,35 @@ function DashboardEstoque({ produtos }) {
 
 function TabelaProdutos({ produtos, onDelete, onEdit }) {
   const [busca, setBusca] = useState("");
+  const indiceProdutosPorNome = useMemo(
+    () => criarIndiceProdutosPorNome(produtos),
+    [produtos],
+  );
 
   const produtosFiltrados = useMemo(() => {
-    const termo = busca.trim().toLowerCase();
+    const termo = normalizarBusca(busca);
 
     if (!termo) {
       return produtos;
     }
 
-    return produtos.filter((produto) =>
-      produto.nome.toLowerCase().includes(termo),
-    );
-  }, [busca, produtos]);
+    const termos = termo.split(/\s+/).filter(Boolean);
+    const idsEncontrados = termos.reduce((idsAtuais, termoAtual) => {
+      const idsDoTermo = indiceProdutosPorNome.get(termoAtual);
+
+      if (!idsDoTermo) {
+        return new Set();
+      }
+
+      return intersectarIds(idsAtuais, idsDoTermo);
+    }, null);
+
+    if (!idsEncontrados || idsEncontrados.size === 0) {
+      return [];
+    }
+
+    return produtos.filter((produto) => idsEncontrados.has(produto.id));
+  }, [busca, indiceProdutosPorNome, produtos]);
 
   function handleExport() {
     if (produtos.length === 0) {
@@ -458,7 +613,7 @@ function TabelaProdutos({ produtos, onDelete, onEdit }) {
 
         <div className="flex w-full flex-col gap-2 sm:flex-row lg:max-w-xl">
           <button
-            className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-cyan-100 disabled:cursor-not-allowed disabled:opacity-60"
             type="button"
             onClick={handleExport}
             disabled={produtos.length === 0}
@@ -468,7 +623,11 @@ function TabelaProdutos({ produtos, onDelete, onEdit }) {
 
           <label className="w-full">
             <span className="sr-only">Buscar produto</span>
+            <span className="sr-only" id="busca-produto-ajuda">
+              Busca indexada em memoria por nome e prefixos dos produtos.
+            </span>
             <input
+              aria-describedby="busca-produto-ajuda"
               className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
               value={busca}
               onChange={(event) => setBusca(event.target.value)}
@@ -542,14 +701,14 @@ function TabelaProdutos({ produtos, onDelete, onEdit }) {
                     <td className="whitespace-nowrap px-3 py-3">
                       <div className="flex justify-end gap-2">
                         <button
-                          className="rounded-md border border-cyan-200 bg-cyan-50 px-2.5 py-1.5 text-xs font-semibold text-cyan-700 transition hover:bg-cyan-100"
+                          className="rounded-md border border-cyan-200 bg-cyan-50 px-2.5 py-1.5 text-xs font-semibold text-cyan-700 transition hover:bg-cyan-100 focus:outline-none focus:ring-4 focus:ring-cyan-100"
                           type="button"
                           onClick={() => onEdit(produto)}
                         >
                           Editar
                         </button>
                         <button
-                          className="rounded-md border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs font-semibold text-red-700 transition hover:bg-red-100"
+                          className="rounded-md border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs font-semibold text-red-700 transition hover:bg-red-100 focus:outline-none focus:ring-4 focus:ring-red-100"
                           type="button"
                           onClick={() => onDelete(produto)}
                         >
@@ -636,6 +795,7 @@ function HistoricoMovimentacoes({ movimentacoes }) {
 }
 
 function EditarProdutoModal({ onClose, onSaved, produto }) {
+  const dialogRef = useDialogFocusTrap(onClose);
   const [nome, setNome] = useState(produto.nome);
   const [preco, setPreco] = useState(String(produto.preco));
   const [loading, setLoading] = useState(false);
@@ -662,15 +822,25 @@ function EditarProdutoModal({ onClose, onSaved, produto }) {
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/50 px-4">
       <form
+        aria-labelledby="editar-produto-title"
+        aria-modal="true"
         className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-xl"
         onSubmit={handleSubmit}
+        ref={dialogRef}
+        role="dialog"
+        tabIndex={-1}
       >
-        <CardTitle eyebrow="Edicao" title="Editar produto" />
+        <CardTitle
+          eyebrow="Edicao"
+          title="Editar produto"
+          titleId="editar-produto-title"
+        />
 
         <div className="space-y-4">
-          <label className="block">
+          <label className="block" htmlFor="editar-produto-nome">
             <span className="text-sm font-medium text-slate-700">Nome</span>
             <input
+              id="editar-produto-nome"
               className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
               value={nome}
               onChange={(event) => setNome(event.target.value)}
@@ -678,9 +848,10 @@ function EditarProdutoModal({ onClose, onSaved, produto }) {
             />
           </label>
 
-          <label className="block">
+          <label className="block" htmlFor="editar-produto-preco">
             <span className="text-sm font-medium text-slate-700">Preco</span>
             <input
+              id="editar-produto-preco"
               className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
               type="number"
               step="0.01"
@@ -693,7 +864,7 @@ function EditarProdutoModal({ onClose, onSaved, produto }) {
 
           <div className="flex justify-end gap-2 pt-2">
             <button
-              className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+              className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-cyan-100"
               type="button"
               onClick={onClose}
               disabled={loading}
@@ -701,7 +872,7 @@ function EditarProdutoModal({ onClose, onSaved, produto }) {
               Cancelar
             </button>
             <button
-              className="rounded-md bg-cyan-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-cyan-800 disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-md bg-cyan-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-cyan-800 focus:outline-none focus:ring-4 focus:ring-cyan-100 disabled:cursor-not-allowed disabled:opacity-60"
               type="submit"
               disabled={loading}
             >
@@ -715,6 +886,7 @@ function EditarProdutoModal({ onClose, onSaved, produto }) {
 }
 
 function ExcluirProdutoModal({ onClose, onConfirm, produto }) {
+  const dialogRef = useDialogFocusTrap(onClose);
   const [loading, setLoading] = useState(false);
 
   async function handleConfirm() {
@@ -728,9 +900,21 @@ function ExcluirProdutoModal({ onClose, onConfirm, produto }) {
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/50 px-4">
-      <div className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-xl">
-        <CardTitle eyebrow="Exclusao" title="Excluir produto" />
-        <p className="text-sm text-slate-600">
+      <div
+        aria-describedby="excluir-produto-descricao"
+        aria-labelledby="excluir-produto-title"
+        aria-modal="true"
+        className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-xl"
+        ref={dialogRef}
+        role="dialog"
+        tabIndex={-1}
+      >
+        <CardTitle
+          eyebrow="Exclusao"
+          title="Excluir produto"
+          titleId="excluir-produto-title"
+        />
+        <p className="text-sm text-slate-600" id="excluir-produto-descricao">
           Esta acao remove o produto{" "}
           <span className="font-semibold text-slate-950">{produto.nome}</span> e
           suas movimentacoes vinculadas.
@@ -738,7 +922,7 @@ function ExcluirProdutoModal({ onClose, onConfirm, produto }) {
 
         <div className="mt-6 flex justify-end gap-2">
           <button
-            className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+            className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-cyan-100"
             type="button"
             onClick={onClose}
             disabled={loading}
@@ -746,7 +930,7 @@ function ExcluirProdutoModal({ onClose, onConfirm, produto }) {
             Cancelar
           </button>
           <button
-            className="rounded-md bg-red-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-md bg-red-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-800 focus:outline-none focus:ring-4 focus:ring-red-100 disabled:cursor-not-allowed disabled:opacity-60"
             type="button"
             onClick={handleConfirm}
             disabled={loading}
@@ -799,9 +983,10 @@ function LoginPage({ onLogin }) {
         </div>
 
         <div className="space-y-4">
-          <label className="block">
+          <label className="block" htmlFor="login-usuario">
             <span className="text-sm font-medium text-slate-700">Usuario</span>
             <input
+              id="login-usuario"
               className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
               value={username}
               onChange={(event) => setUsername(event.target.value)}
@@ -810,9 +995,10 @@ function LoginPage({ onLogin }) {
             />
           </label>
 
-          <label className="block">
+          <label className="block" htmlFor="login-senha">
             <span className="text-sm font-medium text-slate-700">Senha</span>
             <input
+              id="login-senha"
               className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
               type="password"
               value={password}
@@ -824,7 +1010,7 @@ function LoginPage({ onLogin }) {
           </label>
 
           <button
-            className="inline-flex w-full items-center justify-center rounded-md bg-cyan-700 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-cyan-800 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex w-full items-center justify-center rounded-md bg-cyan-700 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-cyan-800 focus:outline-none focus:ring-4 focus:ring-cyan-100 disabled:cursor-not-allowed disabled:opacity-60"
             type="submit"
             disabled={loading}
           >
@@ -844,6 +1030,170 @@ function LoginPage({ onLogin }) {
         }}
       />
     </div>
+  );
+}
+
+const navItems = [
+  { label: "Dashboard", to: "/" },
+  { label: "Produtos", to: "/produtos" },
+  { label: "Operacoes", to: "/operacoes" },
+  { label: "Historico", to: "/historico" },
+];
+
+function getNavLinkClass({ isActive }) {
+  return `rounded-md px-3 py-2 transition focus:outline-none focus:ring-4 focus:ring-cyan-100 ${
+    isActive
+      ? "bg-slate-950 text-white"
+      : "text-slate-600 hover:bg-slate-100 hover:text-slate-950"
+  }`;
+}
+
+function AppHeader({ onLogout }) {
+  return (
+    <header className="border-b border-slate-200 bg-white">
+      <a
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:font-semibold focus:text-cyan-700 focus:shadow"
+        href="#conteudo-principal"
+      >
+        Ir para o conteudo
+      </a>
+
+      <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-5 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-700">
+            GestorDeEstoque
+          </p>
+          <h1 className="mt-1 text-2xl font-semibold text-slate-950">
+            Controle de inventario
+          </h1>
+        </div>
+
+        <nav
+          aria-label="Navegacao principal"
+          className="flex flex-wrap gap-2 text-sm font-medium"
+        >
+          {navItems.map((item) => (
+            <NavLink
+              className={getNavLinkClass}
+              end={item.to === "/"}
+              key={item.to}
+              to={item.to}
+            >
+              {item.label}
+            </NavLink>
+          ))}
+          <button
+            className="rounded-md border border-slate-300 px-3 py-2 text-slate-600 transition hover:bg-slate-100 hover:text-slate-950 focus:outline-none focus:ring-4 focus:ring-cyan-100"
+            type="button"
+            onClick={onLogout}
+          >
+            Sair
+          </button>
+        </nav>
+      </div>
+    </header>
+  );
+}
+
+function PageLayout({ children, erroGlobal, isLoadingDados }) {
+  const mainRef = useRouteFocus();
+
+  return (
+    <main
+      className="mx-auto grid max-w-7xl gap-6 px-4 py-6 focus:outline-none sm:px-6 lg:px-8"
+      id="conteudo-principal"
+      ref={mainRef}
+      tabIndex={-1}
+    >
+      {erroGlobal && (
+        <div
+          className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700"
+          role="alert"
+        >
+          {erroGlobal}
+        </div>
+      )}
+
+      {isLoadingDados && (
+        <div
+          aria-live="polite"
+          className="inline-flex items-center gap-2 rounded-lg border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm font-medium text-cyan-700"
+          role="status"
+        >
+          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+          Atualizando dados do estoque...
+        </div>
+      )}
+
+      {children}
+    </main>
+  );
+}
+
+function DashboardPage({ produtos }) {
+  return <DashboardEstoque produtos={produtos} />;
+}
+
+function ProdutosPage({ onDelete, onEdit, onSaved, produtos }) {
+  return (
+    <div className="grid gap-6 xl:grid-cols-[360px_1fr] xl:items-start">
+      <FormProduto onSaved={onSaved} />
+      <TabelaProdutos
+        produtos={produtos}
+        onDelete={onDelete}
+        onEdit={onEdit}
+      />
+    </div>
+  );
+}
+
+function OperacoesPage({ onSaved, produtos }) {
+  return (
+    <section className="mx-auto w-full max-w-xl">
+      <FormMovimentacao produtos={produtos} onSaved={onSaved} />
+    </section>
+  );
+}
+
+function HistoricoPage({ movimentacoes }) {
+  return <HistoricoMovimentacoes movimentacoes={movimentacoes} />;
+}
+
+function AppRoutes({
+  erroGlobal,
+  isLoadingDados,
+  movimentacoes,
+  onDeleteProduto,
+  onEditProduto,
+  onSaved,
+  produtos,
+}) {
+  return (
+    <PageLayout erroGlobal={erroGlobal} isLoadingDados={isLoadingDados}>
+      <Routes>
+        <Route path="/" element={<DashboardPage produtos={produtos} />} />
+        <Route
+          path="/produtos"
+          element={
+            <ProdutosPage
+              produtos={produtos}
+              onDelete={onDeleteProduto}
+              onEdit={onEditProduto}
+              onSaved={onSaved}
+            />
+          }
+        />
+        <Route
+          path="/operacoes"
+          element={<OperacoesPage produtos={produtos} onSaved={onSaved} />}
+        />
+        <Route
+          path="/historico"
+          element={<HistoricoPage movimentacoes={movimentacoes} />}
+        />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </PageLayout>
   );
 }
 
@@ -915,115 +1265,47 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-950">
-      <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-5 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-700">
-              GestorDeEstoque
-            </p>
-            <h1 className="mt-1 text-2xl font-semibold text-slate-950">
-              Controle de inventario
-            </h1>
-          </div>
+    <BrowserRouter>
+      <div className="min-h-screen bg-slate-100 text-slate-950">
+        <AppHeader onLogout={handleLogout} />
 
-          <nav className="flex flex-wrap gap-2 text-sm font-medium">
-            <a
-              className="rounded-md bg-slate-950 px-3 py-2 text-white"
-              href="#dashboard"
-            >
-              Dashboard
-            </a>
-            <a
-              className="rounded-md px-3 py-2 text-slate-600 hover:bg-slate-100 hover:text-slate-950"
-              href="#produtos"
-            >
-              Produtos
-            </a>
-            <a
-              className="rounded-md px-3 py-2 text-slate-600 hover:bg-slate-100 hover:text-slate-950"
-              href="#operacoes"
-            >
-              Operacoes
-            </a>
-            <a
-              className="rounded-md px-3 py-2 text-slate-600 hover:bg-slate-100 hover:text-slate-950"
-              href="#historico"
-            >
-              Historico
-            </a>
-            <button
-              className="rounded-md border border-slate-300 px-3 py-2 text-slate-600 transition hover:bg-slate-100 hover:text-slate-950"
-              type="button"
-              onClick={handleLogout}
-            >
-              Sair
-            </button>
-          </nav>
-        </div>
-      </header>
-
-      <main className="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:px-8">
-        {erroGlobal && (
-          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
-            {erroGlobal}
-          </div>
-        )}
-
-        {isLoadingDados && (
-          <div className="inline-flex items-center gap-2 rounded-lg border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm font-medium text-cyan-700">
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-            Atualizando dados do estoque...
-          </div>
-        )}
-
-        <div id="dashboard">
-          <DashboardEstoque produtos={produtos} />
-        </div>
-
-        <div className="grid gap-6 xl:grid-cols-[360px_1fr] xl:items-start">
-          <aside className="grid gap-6" id="operacoes">
-            <FormProduto onSaved={carregar} />
-            <FormMovimentacao produtos={produtos} onSaved={carregar} />
-          </aside>
-
-          <div className="grid gap-6" id="produtos">
-            <TabelaProdutos
-              produtos={produtos}
-              onDelete={setProdutoExcluindo}
-              onEdit={setProdutoEditando}
-            />
-            <HistoricoMovimentacoes movimentacoes={movimentacoes} />
-          </div>
-        </div>
-      </main>
-
-      {produtoEditando && (
-        <EditarProdutoModal
-          produto={produtoEditando}
-          onClose={() => setProdutoEditando(null)}
+        <AppRoutes
+          erroGlobal={erroGlobal}
+          isLoadingDados={isLoadingDados}
+          movimentacoes={movimentacoes}
+          onDeleteProduto={setProdutoExcluindo}
+          onEditProduto={setProdutoEditando}
           onSaved={carregar}
+          produtos={produtos}
         />
-      )}
 
-      {produtoExcluindo && (
-        <ExcluirProdutoModal
-          produto={produtoExcluindo}
-          onClose={() => setProdutoExcluindo(null)}
-          onConfirm={handleExcluirProduto}
+        {produtoEditando && (
+          <EditarProdutoModal
+            produto={produtoEditando}
+            onClose={() => setProdutoEditando(null)}
+            onSaved={carregar}
+          />
+        )}
+
+        {produtoExcluindo && (
+          <ExcluirProdutoModal
+            produto={produtoExcluindo}
+            onClose={() => setProdutoExcluindo(null)}
+            onConfirm={handleExcluirProduto}
+          />
+        )}
+
+        <Toaster
+          position="top-right"
+          toastOptions={{
+            duration: 3200,
+            style: {
+              borderRadius: "8px",
+              fontSize: "14px",
+            },
+          }}
         />
-      )}
-
-      <Toaster
-        position="top-right"
-        toastOptions={{
-          duration: 3200,
-          style: {
-            borderRadius: "8px",
-            fontSize: "14px",
-          },
-        }}
-      />
-    </div>
+      </div>
+    </BrowserRouter>
   );
 }
