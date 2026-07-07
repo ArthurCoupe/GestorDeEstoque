@@ -1,2 +1,5 @@
 fastapi
+passlib[bcrypt]
+PyJWT
+pymysql
 uvicorn[standard]
