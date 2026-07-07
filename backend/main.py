@@ -72,10 +72,24 @@ def init_db() -> None:
                 produto_id  INTEGER NOT NULL,
                 tipo        TEXT    NOT NULL CHECK (tipo IN ('entrada', 'saida')),
                 quantidade  INTEGER NOT NULL CHECK (quantidade > 0),
+                criado_em   TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
                 FOREIGN KEY (produto_id) REFERENCES produto(id)
             );
             """
         )
+        columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(movimentacao)").fetchall()
+        }
+        if "criado_em" not in columns:
+            conn.execute("ALTER TABLE movimentacao ADD COLUMN criado_em TEXT")
+            conn.execute(
+                """
+                UPDATE movimentacao
+                   SET criado_em = datetime('now', 'localtime')
+                 WHERE criado_em IS NULL
+                """
+            )
 
 
 @app.on_event("startup")
@@ -90,6 +104,11 @@ class ProdutoIn(BaseModel):
     nome: str = Field(..., min_length=1)
     preco: float = Field(..., gt=0)
     quantidade_atual: int = Field(0, ge=0)
+
+
+class ProdutoUpdate(BaseModel):
+    nome: str = Field(..., min_length=1)
+    preco: float = Field(..., gt=0)
 
 
 class ProdutoOut(BaseModel):
@@ -110,6 +129,11 @@ class MovimentacaoOut(BaseModel):
     produto_id: int
     tipo: str
     quantidade: int
+
+
+class MovimentacaoHistoricoOut(MovimentacaoOut):
+    produto_nome: str
+    data_hora: str
 
 
 # ---------------------------------------------------------------------------
@@ -135,9 +159,64 @@ def cadastrar_produto(produto: ProdutoIn):
         return dict(row)
 
 
+@app.put("/produtos/{produto_id}", response_model=ProdutoOut)
+def editar_produto(produto_id: int, produto: ProdutoUpdate):
+    with get_db() as conn:
+        atual = conn.execute(
+            "SELECT * FROM produto WHERE id = ?", (produto_id,)
+        ).fetchone()
+
+        if atual is None:
+            raise HTTPException(status_code=404, detail="Produto nao encontrado.")
+
+        conn.execute(
+            "UPDATE produto SET nome = ?, preco = ? WHERE id = ?",
+            (produto.nome, produto.preco, produto_id),
+        )
+        row = conn.execute(
+            "SELECT * FROM produto WHERE id = ?", (produto_id,)
+        ).fetchone()
+        return dict(row)
+
+
+@app.delete("/produtos/{produto_id}", status_code=204)
+def excluir_produto(produto_id: int):
+    with get_db() as conn:
+        produto = conn.execute(
+            "SELECT * FROM produto WHERE id = ?", (produto_id,)
+        ).fetchone()
+
+        if produto is None:
+            raise HTTPException(status_code=404, detail="Produto nao encontrado.")
+
+        conn.execute("DELETE FROM movimentacao WHERE produto_id = ?", (produto_id,))
+        conn.execute("DELETE FROM produto WHERE id = ?", (produto_id,))
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Rotas – Movimentações
 # ---------------------------------------------------------------------------
+@app.get("/movimentacoes", response_model=list[MovimentacaoHistoricoOut])
+def listar_movimentacoes():
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                m.id,
+                m.produto_id,
+                COALESCE(p.nome, 'Produto removido') AS produto_nome,
+                m.tipo,
+                m.quantidade,
+                COALESCE(m.criado_em, datetime('now', 'localtime')) AS data_hora
+            FROM movimentacao m
+            LEFT JOIN produto p ON p.id = m.produto_id
+            ORDER BY m.id DESC
+            """
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
 @app.post("/movimentacoes", response_model=MovimentacaoOut, status_code=201)
 def registrar_movimentacao(mov: MovimentacaoIn):
     with get_db() as conn:
@@ -170,7 +249,10 @@ def registrar_movimentacao(mov: MovimentacaoIn):
             (nova_qtd, mov.produto_id),
         )
         cursor = conn.execute(
-            "INSERT INTO movimentacao (produto_id, tipo, quantidade) VALUES (?, ?, ?)",
+            """
+            INSERT INTO movimentacao (produto_id, tipo, quantidade, criado_em)
+            VALUES (?, ?, ?, datetime('now', 'localtime'))
+            """,
             (mov.produto_id, mov.tipo, mov.quantidade),
         )
         row = conn.execute(
