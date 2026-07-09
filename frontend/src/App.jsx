@@ -1,5 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bell, Bot, Loader2, Moon, Sun } from "lucide-react";
+import ExcelJS from "exceljs";
+import { saveAs } from "file-saver";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
+import {
+  Bell,
+  Bot,
+  FileSpreadsheet,
+  FileText,
+  Loader2,
+  Moon,
+  Sun,
+} from "lucide-react";
 import toast, { Toaster } from "react-hot-toast";
 import {
   BrowserRouter,
@@ -378,11 +390,6 @@ function formatExcelNumber(value) {
   return Number(value || 0).toFixed(2);
 }
 
-function csvEscape(value) {
-  const text = String(value ?? "");
-  return `"${text.replaceAll('"', '""')}"`;
-}
-
 function buildProdutosExcelHtml(produtos) {
   const dataGeracao = new Intl.DateTimeFormat("pt-BR", {
     dateStyle: "short",
@@ -684,66 +691,313 @@ function exportarProdutosExcel(produtos) {
   URL.revokeObjectURL(url);
 }
 
-function exportarProdutosCsvFinanceiro(produtos) {
-  const headers = [
-    "ID",
-    "Produto",
-    "Preco de Custo",
-    "Preco de Venda",
-    "Margem Bruta %",
-    "Imposto %",
-    "Taxa Operacional %",
-    "Estoque Atual",
-    "Estoque Minimo",
-    "Saldo vs Minimo",
-    "Qtd. a Repor",
-    "Valor Estoque Custo",
-    "Venda Potencial",
-    "Status",
-    "Observacao",
+function getReportGeneratedAt() {
+  return new Intl.DateTimeFormat("pt-BR", {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(new Date());
+}
+
+function getMovimentacaoReportPeriod(movimentacoes) {
+  const datas = movimentacoes
+    .map((movimentacao) => new Date(movimentacao.data_hora?.replace(" ", "T")))
+    .filter((data) => !Number.isNaN(data.getTime()))
+    .sort((a, b) => a.getTime() - b.getTime());
+
+  if (datas.length === 0) {
+    return "Registros visiveis na tabela";
+  }
+
+  const formatador = new Intl.DateTimeFormat("pt-BR", {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+
+  return `${formatador.format(datas[0])} ate ${formatador.format(
+    datas[datas.length - 1],
+  )}`;
+}
+
+function getMovimentacoesReportRows(movimentacoes) {
+  return movimentacoes.map((movimentacao) => ({
+    dataHora: formatDate(movimentacao.data_hora),
+    produto: movimentacao.produto_nome,
+    tipo: movimentacao.tipo === "entrada" ? "Entrada" : "Saida",
+    status: getVendaStatusLabel(movimentacao.status),
+    quantidade: asNumber(movimentacao.quantidade),
+    valorBruto: asNumber(movimentacao.valor_bruto_total),
+    valorCusto: asNumber(movimentacao.valor_custo_total),
+    impostos: asNumber(movimentacao.valor_impostos_total),
+    lucroLiquido: asNumber(movimentacao.lucro_liquido),
+    usuario: movimentacao.usuario_username ?? "-",
+  }));
+}
+
+function getMovimentacoesReportSummary(movimentacoes) {
+  return movimentacoes.reduce(
+    (summary, movimentacao) => {
+      const quantidade = asNumber(movimentacao.quantidade);
+
+      if (movimentacao.tipo === "entrada") {
+        summary.totalEntradas += quantidade;
+      }
+
+      if (movimentacao.tipo === "saida") {
+        summary.totalSaidas += asNumber(movimentacao.valor_bruto_total);
+      }
+
+      summary.lucroLiquido += asNumber(movimentacao.lucro_liquido);
+      return summary;
+    },
+    { totalEntradas: 0, totalSaidas: 0, lucroLiquido: 0 },
+  );
+}
+
+async function exportarHistoricoExcel(movimentacoes) {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = "GestorDeEstoque";
+  workbook.created = new Date();
+
+  const worksheet = workbook.addWorksheet("Relatorio Financeiro", {
+    views: [{ showGridLines: false }],
+  });
+  const generatedAt = getReportGeneratedAt();
+  const periodo = getMovimentacaoReportPeriod(movimentacoes);
+  const summary = getMovimentacoesReportSummary(movimentacoes);
+  const rows = getMovimentacoesReportRows(movimentacoes);
+  const reportColumns = [
+    { header: "Data/Hora", key: "dataHora", width: 18 },
+    { header: "Produto", key: "produto", width: 28 },
+    { header: "Tipo", key: "tipo", width: 12 },
+    { header: "Status", key: "status", width: 24 },
+    { header: "Qtd", key: "quantidade", width: 10 },
+    { header: "Valor Bruto", key: "valorBruto", width: 16 },
+    { header: "Valor Custo", key: "valorCusto", width: 16 },
+    { header: "Impostos/Taxas", key: "impostos", width: 18 },
+    { header: "Lucro Liquido", key: "lucroLiquido", width: 18 },
+    { header: "Usuario", key: "usuario", width: 18 },
   ];
 
-  const rows = produtos.map((produto) => {
-    const estoqueMinimo = produto.estoque_minimo ?? 5;
-    const precoCusto = asNumber(produto.preco_custo);
-    const precoVenda = asNumber(produto.preco_venda);
-    const risco = getReportRisk(produto);
+  worksheet.mergeCells("A1:J1");
+  worksheet.getCell("A1").value =
+    "GESTOR DE ESTOQUE - RELATORIO FINANCEIRO";
+  worksheet.getCell("A1").font = {
+    bold: true,
+    color: { argb: "FF0F172A" },
+    size: 16,
+  };
+  worksheet.getCell("A1").alignment = { horizontal: "left" };
 
-    return [
-      produto.id,
-      produto.nome,
-      formatExcelNumber(precoCusto),
-      formatExcelNumber(precoVenda),
-      formatExcelNumber(calcularMargemBruta(produto)),
-      formatExcelNumber(produto.imposto_percentual),
-      formatExcelNumber(produto.taxa_operacional_percentual),
-      produto.quantidade_atual,
-      estoqueMinimo,
-      produto.quantidade_atual - estoqueMinimo,
-      Math.max(estoqueMinimo - produto.quantidade_atual, 0),
-      formatExcelNumber(precoCusto * produto.quantidade_atual),
-      formatExcelNumber(precoVenda * produto.quantidade_atual),
-      risco.label,
-      risco.note,
-    ];
+  worksheet.mergeCells("A2:J2");
+  worksheet.getCell("A2").value = `Gerado em ${generatedAt} | Periodo: ${periodo}`;
+  worksheet.getCell("A2").font = { color: { argb: "FF64748B" }, size: 11 };
+
+  const summaryStartRow = 4;
+  const summaryCells = [
+    ["A", "Total de Entradas", summary.totalEntradas, "#,##0"],
+    ["D", "Total de Saidas", summary.totalSaidas, '"R$" #,##0.00'],
+    ["G", "Lucro Liquido", summary.lucroLiquido, '"R$" #,##0.00'],
+  ];
+
+  summaryCells.forEach(([column, label, value, numberFormat]) => {
+    const labelCell = worksheet.getCell(`${column}${summaryStartRow}`);
+    const valueCell = worksheet.getCell(`${column}${summaryStartRow + 1}`);
+    labelCell.value = label;
+    valueCell.value = value;
+    valueCell.numFmt = numberFormat;
+
+    [labelCell, valueCell].forEach((cell) => {
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFF3F4F6" },
+      };
+      cell.border = {
+        top: { style: "thin", color: { argb: "FFE5E7EB" } },
+        left: { style: "thin", color: { argb: "FFE5E7EB" } },
+        bottom: { style: "thin", color: { argb: "FFE5E7EB" } },
+        right: { style: "thin", color: { argb: "FFE5E7EB" } },
+      };
+    });
+
+    labelCell.font = { bold: true, color: { argb: "FF475569" } };
+    valueCell.font = { bold: true, color: { argb: "FF0F172A" }, size: 14 };
   });
 
-  const csv = [headers, ...rows]
-    .map((row) => row.map(csvEscape).join(";"))
-    .join("\r\n");
-  const blob = new Blob(["\ufeff", csv], {
-    type: "text/csv;charset=utf-8",
+  worksheet.columns = reportColumns.map(({ key, width }) => ({ key, width }));
+  const headerRowNumber = 7;
+  const headerRow = worksheet.getRow(headerRowNumber);
+  headerRow.values = reportColumns.map((column) => column.header);
+  headerRow.height = 24;
+  headerRow.eachCell((cell) => {
+    cell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FF1E3A8A" },
+    };
+    cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    cell.alignment = { horizontal: "center", vertical: "middle" };
+    cell.border = {
+      top: { style: "thin", color: { argb: "FF1E40AF" } },
+      left: { style: "thin", color: { argb: "FF1E40AF" } },
+      bottom: { style: "thin", color: { argb: "FF1E40AF" } },
+      right: { style: "thin", color: { argb: "FF1E40AF" } },
+    };
   });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `relatorio-financeiro-estoque-${new Date()
-    .toISOString()
-    .slice(0, 10)}.csv`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
+
+  rows.forEach((row, index) => {
+    const worksheetRow = worksheet.addRow(row);
+    const isEven = index % 2 === 1;
+
+    worksheetRow.eachCell((cell, columnNumber) => {
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: isEven ? "FFF3F4F6" : "FFFFFFFF" },
+      };
+      cell.border = {
+        top: { style: "thin", color: { argb: "FFE5E7EB" } },
+        left: { style: "thin", color: { argb: "FFE5E7EB" } },
+        bottom: { style: "thin", color: { argb: "FFE5E7EB" } },
+        right: { style: "thin", color: { argb: "FFE5E7EB" } },
+      };
+      cell.alignment = {
+        horizontal: columnNumber >= 5 ? "right" : "left",
+        vertical: "middle",
+      };
+
+      if (columnNumber >= 6 && columnNumber <= 9) {
+        cell.numFmt = '"R$" #,##0.00';
+      }
+    });
+  });
+
+  worksheet.columns.forEach((column) => {
+    let maxLength = column.header?.length ?? 12;
+    column.eachCell({ includeEmpty: true }, (cell) => {
+      const value = cell.value;
+      const length = value == null ? 0 : String(value).length;
+      maxLength = Math.max(maxLength, length);
+    });
+    column.width = Math.min(Math.max(maxLength + 2, column.width ?? 12), 32);
+  });
+
+  worksheet.autoFilter = {
+    from: { row: headerRowNumber, column: 1 },
+    to: { row: headerRowNumber + rows.length, column: reportColumns.length },
+  };
+  worksheet.views = [
+    { state: "frozen", ySplit: headerRowNumber, showGridLines: false },
+  ];
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  saveAs(
+    new Blob([buffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    }),
+    `relatorio-financeiro-${new Date().toISOString().slice(0, 10)}.xlsx`,
+  );
+}
+
+function exportarHistoricoPdf(movimentacoes) {
+  const doc = new jsPDF({
+    format: "a4",
+    orientation: "landscape",
+    unit: "pt",
+  });
+  const generatedAt = getReportGeneratedAt();
+  const periodo = getMovimentacaoReportPeriod(movimentacoes);
+  const summary = getMovimentacoesReportSummary(movimentacoes);
+  const rows = getMovimentacoesReportRows(movimentacoes);
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(16);
+  doc.setTextColor(15, 23, 42);
+  doc.text("GESTOR DE ESTOQUE - RELATORIO FINANCEIRO", 40, 42);
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(100, 116, 139);
+  doc.text(`Gerado em ${generatedAt} | Periodo: ${periodo}`, 40, 60);
+
+  const kpiY = 84;
+  const kpis = [
+    ["Total de Entradas", `${summary.totalEntradas}`],
+    ["Total de Saidas", currencyFormatter.format(summary.totalSaidas)],
+    ["Lucro Liquido", currencyFormatter.format(summary.lucroLiquido)],
+  ];
+
+  kpis.forEach(([label, value], index) => {
+    const x = 40 + index * 220;
+    doc.setFillColor(243, 244, 246);
+    doc.setDrawColor(229, 231, 235);
+    doc.roundedRect(x, kpiY, 190, 48, 4, 4, "FD");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.setTextColor(71, 85, 105);
+    doc.text(label.toUpperCase(), x + 12, kpiY + 17);
+    doc.setFontSize(13);
+    doc.setTextColor(15, 23, 42);
+    doc.text(value, x + 12, kpiY + 36);
+  });
+
+  autoTable(doc, {
+    startY: 154,
+    theme: "grid",
+    head: [
+      [
+        "Data/Hora",
+        "Produto",
+        "Tipo",
+        "Status",
+        "Qtd",
+        "Bruto",
+        "Custo",
+        "Impostos",
+        "Lucro",
+        "Usuario",
+      ],
+    ],
+    body: rows.map((row) => [
+      row.dataHora,
+      row.produto,
+      row.tipo,
+      row.status,
+      row.quantidade,
+      currencyFormatter.format(row.valorBruto),
+      currencyFormatter.format(row.valorCusto),
+      currencyFormatter.format(row.impostos),
+      currencyFormatter.format(row.lucroLiquido),
+      row.usuario,
+    ]),
+    headStyles: {
+      fillColor: [30, 58, 138],
+      halign: "center",
+      textColor: [255, 255, 255],
+      fontStyle: "bold",
+    },
+    styles: {
+      cellPadding: 5,
+      fontSize: 8,
+      lineColor: [229, 231, 235],
+      lineWidth: 0.5,
+      overflow: "linebreak",
+      valign: "middle",
+    },
+    alternateRowStyles: {
+      fillColor: [243, 244, 246],
+    },
+    columnStyles: {
+      4: { halign: "right" },
+      5: { halign: "right" },
+      6: { halign: "right" },
+      7: { halign: "right" },
+      8: { halign: "right" },
+    },
+    margin: { left: 40, right: 40 },
+  });
+
+  doc.save(`relatorio-financeiro-${new Date().toISOString().slice(0, 10)}.pdf`);
 }
 
 function CardTitle({ eyebrow, title, titleId }) {
@@ -1371,23 +1625,13 @@ function TabelaProdutos({ isAdmin, produtos, onDelete, onEdit }) {
     toast.success("Relatorio Excel exportado.");
   }
 
-  function handleExportCsv() {
-    if (produtos.length === 0) {
-      toast.error("Nao ha produtos para exportar.");
-      return;
-    }
-
-    exportarProdutosCsvFinanceiro(produtos);
-    toast.success("CSV financeiro exportado.");
-  }
-
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-900">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <CardTitle eyebrow="Inventario" title="Estoque atual" />
 
         <div className="flex w-full flex-col gap-2 sm:flex-row lg:max-w-xl">
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div className="grid gap-2">
             <button
               className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-cyan-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800 dark:focus:ring-cyan-900/60"
               type="button"
@@ -1395,14 +1639,6 @@ function TabelaProdutos({ isAdmin, produtos, onDelete, onEdit }) {
               disabled={produtos.length === 0}
             >
               Exportar Excel
-            </button>
-            <button
-              className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-cyan-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800 dark:focus:ring-cyan-900/60"
-              type="button"
-              onClick={handleExportCsv}
-              disabled={produtos.length === 0}
-            >
-              Exportar CSV
             </button>
           </div>
 
@@ -1529,6 +1765,7 @@ function TabelaProdutos({ isAdmin, produtos, onDelete, onEdit }) {
 }
 
 function HistoricoMovimentacoes({ movimentacoes }) {
+  const [exportando, setExportando] = useState("");
   const totais = useMemo(
     () =>
       movimentacoes.reduce(
@@ -1544,12 +1781,77 @@ function HistoricoMovimentacoes({ movimentacoes }) {
     [movimentacoes],
   );
 
+  async function handleExportExcel() {
+    if (movimentacoes.length === 0) {
+      toast.error("Nao ha movimentacoes para exportar.");
+      return;
+    }
+
+    setExportando("excel");
+    try {
+      await exportarHistoricoExcel(movimentacoes);
+      toast.success("Relatorio Excel exportado.");
+    } catch (err) {
+      toast.error(err.message || "Nao foi possivel gerar o Excel.");
+    } finally {
+      setExportando("");
+    }
+  }
+
+  function handleExportPdf() {
+    if (movimentacoes.length === 0) {
+      toast.error("Nao ha movimentacoes para exportar.");
+      return;
+    }
+
+    setExportando("pdf");
+    try {
+      exportarHistoricoPdf(movimentacoes);
+      toast.success("Relatorio PDF exportado.");
+    } catch (err) {
+      toast.error(err.message || "Nao foi possivel gerar o PDF.");
+    } finally {
+      setExportando("");
+    }
+  }
+
   return (
     <section
       className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-900"
       id="historico"
     >
-      <CardTitle eyebrow="Auditoria" title="Historico de movimentacoes" />
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <CardTitle eyebrow="Auditoria" title="Historico de movimentacoes" />
+
+        <div className="flex flex-wrap gap-2">
+          <button
+            className="inline-flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 shadow-sm transition hover:bg-emerald-100 focus:outline-none focus:ring-4 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-900/70 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-900/50 dark:focus:ring-emerald-900/60"
+            type="button"
+            onClick={handleExportExcel}
+            disabled={movimentacoes.length === 0 || Boolean(exportando)}
+          >
+            {exportando === "excel" ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <FileSpreadsheet className="h-4 w-4" aria-hidden="true" />
+            )}
+            Exportar Excel
+          </button>
+          <button
+            className="inline-flex items-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 shadow-sm transition hover:bg-red-100 focus:outline-none focus:ring-4 focus:ring-red-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/70 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-900/50 dark:focus:ring-red-900/60"
+            type="button"
+            onClick={handleExportPdf}
+            disabled={movimentacoes.length === 0 || Boolean(exportando)}
+          >
+            {exportando === "pdf" ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <FileText className="h-4 w-4" aria-hidden="true" />
+            )}
+            Exportar PDF
+          </button>
+        </div>
+      </div>
 
       {movimentacoes.length > 0 && (
         <div className="mb-5 grid gap-3 sm:grid-cols-3">
