@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bell, Bot, Loader2 } from "lucide-react";
+import { Bell, Bot, Loader2, Moon, Sun } from "lucide-react";
 import toast, { Toaster } from "react-hot-toast";
 import {
   BrowserRouter,
@@ -86,6 +86,41 @@ function formatRole(role) {
   return role === "admin" ? "Admin" : "Operador";
 }
 
+function getInitialTheme() {
+  if (typeof window === "undefined") {
+    return "light";
+  }
+
+  const savedTheme = window.localStorage.getItem("theme");
+
+  if (savedTheme === "dark" || savedTheme === "light") {
+    return savedTheme;
+  }
+
+  return window.matchMedia?.("(prefers-color-scheme: dark)").matches
+    ? "dark"
+    : "light";
+}
+
+function useTheme() {
+  const [theme, setTheme] = useState(getInitialTheme);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.toggle("dark", theme === "dark");
+    root.style.colorScheme = theme;
+    window.localStorage.setItem("theme", theme);
+  }, [theme]);
+
+  const toggleTheme = useCallback(() => {
+    setTheme((currentTheme) =>
+      currentTheme === "dark" ? "light" : "dark",
+    );
+  }, []);
+
+  return { isDarkMode: theme === "dark", theme, toggleTheme };
+}
+
 function formatarPrevisao(previsao) {
   if (!previsao) {
     return "Sem dados";
@@ -114,14 +149,14 @@ function getVendaStatusLabel(statusVenda) {
 
 function getVendaStatusClasses(statusVenda) {
   if (statusVenda === "orcamento") {
-    return "bg-teal-50 text-teal-700 ring-teal-200";
+    return "bg-teal-50 text-teal-700 ring-teal-200 dark:bg-teal-950/50 dark:text-teal-300 dark:ring-teal-900";
   }
 
   if (statusVenda === "pendente") {
-    return "bg-red-50 text-red-700 ring-red-200";
+    return "bg-red-50 text-red-700 ring-red-200 dark:bg-red-950/50 dark:text-red-300 dark:ring-red-900";
   }
 
-  return "bg-blue-50 text-blue-700 ring-blue-200";
+  return "bg-blue-50 text-blue-700 ring-blue-200 dark:bg-blue-950/50 dark:text-blue-300 dark:ring-blue-900";
 }
 
 function LoadingLabel({ text }) {
@@ -139,20 +174,23 @@ function getStatus(produto) {
   if (produto.quantidade_atual === 0) {
     return {
       label: "Esgotado",
-      classes: "bg-red-50 text-red-700 ring-red-200",
+      classes:
+        "bg-red-50 text-red-700 ring-red-200 dark:bg-red-950/50 dark:text-red-300 dark:ring-red-900",
     };
   }
 
   if (produto.quantidade_atual <= estoqueMinimo) {
     return {
       label: "Baixo",
-      classes: "bg-amber-50 text-amber-700 ring-amber-200",
+      classes:
+        "bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-950/50 dark:text-amber-300 dark:ring-amber-900",
     };
   }
 
   return {
     label: "OK",
-    classes: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+    classes:
+      "bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:ring-emerald-900",
   };
 }
 
@@ -711,10 +749,13 @@ function exportarProdutosCsvFinanceiro(produtos) {
 function CardTitle({ eyebrow, title, titleId }) {
   return (
     <div className="mb-5">
-      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">
         {eyebrow}
       </p>
-      <h2 className="mt-1 text-lg font-semibold text-slate-950" id={titleId}>
+      <h2
+        className="mt-1 text-lg font-semibold text-slate-950 dark:text-slate-100"
+        id={titleId}
+      >
         {title}
       </h2>
     </div>
@@ -767,17 +808,17 @@ function FormProduto({ onSaved }) {
 
   return (
     <form
-      className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm"
+      className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-900"
       onSubmit={handleSubmit}
     >
       <CardTitle eyebrow="Cadastro" title="Novo produto" />
 
       <div className="space-y-4">
         <label className="block" htmlFor="produto-nome">
-          <span className="text-sm font-medium text-slate-700">Nome</span>
+          <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Nome</span>
           <input
             id="produto-nome"
-            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
+            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-cyan-500 dark:focus:ring-cyan-900/60"
             value={nome}
             onChange={(event) => setNome(event.target.value)}
             required
@@ -787,12 +828,12 @@ function FormProduto({ onSaved }) {
 
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="block" htmlFor="produto-preco-custo">
-            <span className="text-sm font-medium text-slate-700">
+            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
               Preco de custo
             </span>
             <input
               id="produto-preco-custo"
-              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
+              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-cyan-500 dark:focus:ring-cyan-900/60"
               type="number"
               step="0.01"
               min="0"
@@ -804,12 +845,12 @@ function FormProduto({ onSaved }) {
           </label>
 
           <label className="block" htmlFor="produto-preco-venda">
-            <span className="text-sm font-medium text-slate-700">
+            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
               Preco de venda
             </span>
             <input
               id="produto-preco-venda"
-              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
+              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-cyan-500 dark:focus:ring-cyan-900/60"
               type="number"
               step="0.01"
               min="0.01"
@@ -821,12 +862,12 @@ function FormProduto({ onSaved }) {
           </label>
 
           <label className="block" htmlFor="produto-imposto">
-            <span className="text-sm font-medium text-slate-700">
+            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
               % Imposto
             </span>
             <input
               id="produto-imposto"
-              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
+              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-cyan-500 dark:focus:ring-cyan-900/60"
               type="number"
               step="0.01"
               min="0"
@@ -837,12 +878,12 @@ function FormProduto({ onSaved }) {
           </label>
 
           <label className="block" htmlFor="produto-taxa-operacional">
-            <span className="text-sm font-medium text-slate-700">
+            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
               % Taxa
             </span>
             <input
               id="produto-taxa-operacional"
-              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
+              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-cyan-500 dark:focus:ring-cyan-900/60"
               type="number"
               step="0.01"
               min="0"
@@ -856,12 +897,12 @@ function FormProduto({ onSaved }) {
         </div>
 
         <label className="block" htmlFor="produto-quantidade">
-          <span className="text-sm font-medium text-slate-700">
+          <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
             Quantidade inicial
           </span>
           <input
             id="produto-quantidade"
-            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
+            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-cyan-500 dark:focus:ring-cyan-900/60"
             type="number"
             min="0"
             value={qtd}
@@ -871,12 +912,12 @@ function FormProduto({ onSaved }) {
         </label>
 
         <label className="block" htmlFor="produto-estoque-minimo">
-          <span className="text-sm font-medium text-slate-700">
+          <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
             Estoque minimo
           </span>
           <input
             id="produto-estoque-minimo"
-            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
+            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-cyan-500 dark:focus:ring-cyan-900/60"
             type="number"
             min="0"
             value={estoqueMinimo}
@@ -932,17 +973,17 @@ function FormMovimentacao({ produtos, onSaved }) {
 
   return (
     <form
-      className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm"
+      className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-900"
       onSubmit={handleSubmit}
     >
       <CardTitle eyebrow="Estoque" title="Movimentacao" />
 
       <div className="space-y-4">
         <label className="block" htmlFor="movimentacao-produto">
-          <span className="text-sm font-medium text-slate-700">Produto</span>
+          <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Produto</span>
           <select
             id="movimentacao-produto"
-            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
+            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-cyan-500 dark:focus:ring-cyan-900/60"
             value={produtoId}
             onChange={(event) => setProdutoId(event.target.value)}
             required
@@ -957,13 +998,13 @@ function FormMovimentacao({ produtos, onSaved }) {
         </label>
 
         <fieldset>
-          <legend className="text-sm font-medium text-slate-700">Tipo</legend>
+          <legend className="text-sm font-medium text-slate-700 dark:text-slate-300">Tipo</legend>
           <div className="mt-2 grid grid-cols-2 gap-2">
             <label
               className={`flex cursor-pointer items-center justify-center rounded-md border px-3 py-2 text-sm font-semibold transition focus-within:ring-4 focus-within:ring-emerald-100 ${
                 tipo === "entrada"
-                  ? "border-emerald-500 bg-emerald-50 text-emerald-700"
-                  : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+                  ? "border-emerald-500 bg-emerald-50 text-emerald-700 dark:border-emerald-500 dark:bg-emerald-950/50 dark:text-emerald-300"
+                  : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:border-slate-500"
               }`}
             >
               <input
@@ -980,8 +1021,8 @@ function FormMovimentacao({ produtos, onSaved }) {
             <label
               className={`flex cursor-pointer items-center justify-center rounded-md border px-3 py-2 text-sm font-semibold transition focus-within:ring-4 focus-within:ring-red-100 ${
                 tipo === "saida"
-                  ? "border-red-500 bg-red-50 text-red-700"
-                  : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+                  ? "border-red-500 bg-red-50 text-red-700 dark:border-red-500 dark:bg-red-950/50 dark:text-red-300"
+                  : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:border-slate-500"
               }`}
             >
               <input
@@ -999,12 +1040,12 @@ function FormMovimentacao({ produtos, onSaved }) {
 
         {tipo === "saida" && (
           <label className="block" htmlFor="movimentacao-status-venda">
-            <span className="text-sm font-medium text-slate-700">
+            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
               Status da venda
             </span>
             <select
               id="movimentacao-status-venda"
-              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
+              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-cyan-500 dark:focus:ring-cyan-900/60"
               value={statusVenda}
               onChange={(event) => setStatusVenda(event.target.value)}
               required
@@ -1017,10 +1058,10 @@ function FormMovimentacao({ produtos, onSaved }) {
         )}
 
         <label className="block" htmlFor="movimentacao-quantidade">
-          <span className="text-sm font-medium text-slate-700">Quantidade</span>
+          <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Quantidade</span>
           <input
             id="movimentacao-quantidade"
-            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
+            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-cyan-500 dark:focus:ring-cyan-900/60"
             type="number"
             min="1"
             value={qtd}
@@ -1031,7 +1072,7 @@ function FormMovimentacao({ produtos, onSaved }) {
         </label>
 
         <button
-          className="inline-flex w-full items-center justify-center rounded-md bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 focus:outline-none focus:ring-4 focus:ring-cyan-100 disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex w-full items-center justify-center rounded-md bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 focus:outline-none focus:ring-4 focus:ring-cyan-100 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-cyan-600 dark:text-slate-950 dark:hover:bg-cyan-500 dark:focus:ring-cyan-900/60"
           type="submit"
           disabled={loading || produtos.length === 0}
         >
@@ -1046,7 +1087,7 @@ function FormMovimentacao({ produtos, onSaved }) {
   );
 }
 
-function DashboardEstoque({ estatisticas, previsoes, produtos }) {
+function DashboardEstoque({ estatisticas, isDarkMode, previsoes, produtos }) {
   const previsoesPorProdutoId = useMemo(
     () =>
       new Map(
@@ -1086,30 +1127,44 @@ function DashboardEstoque({ estatisticas, previsoes, produtos }) {
   const produtosBaixos = produtos.filter(
     (produto) => produto.quantidade_atual <= (produto.estoque_minimo ?? 5),
   ).length;
+  const chartGridColor = isDarkMode ? "#334155" : "#e2e8f0";
+  const chartTextColor = isDarkMode ? "#cbd5e1" : "#475569";
+  const chartAxisColor = isDarkMode ? "#475569" : "#cbd5e1";
+  const chartTooltipStyle = {
+    background: isDarkMode ? "#0f172a" : "#ffffff",
+    border: `1px solid ${isDarkMode ? "#334155" : "#e2e8f0"}`,
+    borderRadius: "8px",
+    boxShadow: "0 12px 30px rgba(15, 23, 42, 0.18)",
+    color: isDarkMode ? "#f8fafc" : "#0f172a",
+  };
   const kpisComerciais = [
     {
       label: "Total Vendas",
       value: currencyFormatter.format(estatisticas?.total_vendas ?? 0),
       description: `${estatisticas?.qtd_vendas ?? 0} vendas realizadas`,
-      classes: "border-blue-200 bg-blue-50 text-blue-700",
+      classes:
+        "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900/70 dark:bg-blue-950/40 dark:text-blue-300",
     },
     {
       label: "Total Liquido",
       value: currencyFormatter.format(estatisticas?.total_liquido ?? 0),
       description: "Receita menos custos e impostos",
-      classes: "border-emerald-200 bg-emerald-50 text-emerald-700",
+      classes:
+        "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/40 dark:text-emerald-300",
     },
     {
       label: "Orcamentos",
       value: currencyFormatter.format(estatisticas?.total_orcamentos ?? 0),
       description: `${estatisticas?.qtd_orcamentos ?? 0} oportunidades abertas`,
-      classes: "border-teal-200 bg-teal-50 text-teal-700",
+      classes:
+        "border-teal-200 bg-teal-50 text-teal-700 dark:border-teal-900/70 dark:bg-teal-950/40 dark:text-teal-300",
     },
     {
       label: "Pedidos sem Confirmacao",
       value: estatisticas?.pedidos_sem_confirmacao ?? 0,
       description: "Saidas pendentes travando estoque",
-      classes: "border-red-200 bg-red-50 text-red-700",
+      classes:
+        "border-red-200 bg-red-50 text-red-700 dark:border-red-900/70 dark:bg-red-950/40 dark:text-red-300",
     },
   ];
 
@@ -1127,10 +1182,10 @@ function DashboardEstoque({ estatisticas, previsoes, produtos }) {
             <p className="text-xs font-semibold uppercase tracking-wide">
               {kpi.label}
             </p>
-            <p className="mt-2 text-3xl font-semibold text-slate-950">
+            <p className="mt-2 text-3xl font-semibold text-slate-950 dark:text-slate-100">
               {kpi.value}
             </p>
-            <p className="mt-1 text-sm font-medium text-slate-600">
+            <p className="mt-1 text-sm font-medium text-slate-600 dark:text-slate-400">
               {kpi.description}
             </p>
           </div>
@@ -1138,10 +1193,10 @@ function DashboardEstoque({ estatisticas, previsoes, produtos }) {
       </section>
 
       <section className="grid gap-4 lg:grid-cols-[1fr_320px]">
-        <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-900">
           <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
             <CardTitle eyebrow="Dashboard" title="Top 5 produtos em estoque" />
-            <p className="text-sm text-slate-500">
+            <p className="text-sm text-slate-500 dark:text-slate-400">
               Ordenado por quantidade atual
             </p>
           </div>
@@ -1150,26 +1205,22 @@ function DashboardEstoque({ estatisticas, previsoes, produtos }) {
             {topProdutos.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={topProdutos} margin={{ left: -20, right: 8 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} />
                   <XAxis
                     dataKey="nome"
-                    tick={{ fill: "#475569", fontSize: 12 }}
+                    tick={{ fill: chartTextColor, fontSize: 12 }}
                     tickLine={false}
-                    axisLine={{ stroke: "#cbd5e1" }}
+                    axisLine={{ stroke: chartAxisColor }}
                   />
                   <YAxis
                     allowDecimals={false}
-                    tick={{ fill: "#475569", fontSize: 12 }}
+                    tick={{ fill: chartTextColor, fontSize: 12 }}
                     tickLine={false}
-                    axisLine={{ stroke: "#cbd5e1" }}
+                    axisLine={{ stroke: chartAxisColor }}
                   />
                   <Tooltip
                     cursor={{ fill: "rgba(14, 165, 233, 0.08)" }}
-                    contentStyle={{
-                      border: "1px solid #e2e8f0",
-                      borderRadius: "8px",
-                      boxShadow: "0 12px 30px rgba(15, 23, 42, 0.12)",
-                    }}
+                    contentStyle={chartTooltipStyle}
                     formatter={(value) => [`${value} unidades`, "Estoque"]}
                   />
                   <Bar
@@ -1180,7 +1231,7 @@ function DashboardEstoque({ estatisticas, previsoes, produtos }) {
                 </BarChart>
               </ResponsiveContainer>
             ) : (
-              <div className="flex h-full items-center justify-center rounded-md border border-dashed border-slate-300 bg-slate-50 text-sm text-slate-500">
+              <div className="flex h-full items-center justify-center rounded-md border border-dashed border-slate-300 bg-slate-50 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-400">
                 Cadastre produtos para visualizar o ranking.
               </div>
             )}
@@ -1188,51 +1239,51 @@ function DashboardEstoque({ estatisticas, previsoes, produtos }) {
 
           {topProdutos.length > 0 && (
             <div className="mt-5 overflow-x-auto">
-              <table className="min-w-full divide-y divide-slate-200">
+              <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800">
                 <thead>
                   <tr>
-                    <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                       Produto
                     </th>
-                    <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                       Estoque
                     </th>
-                    <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                       Preco de custo
                     </th>
-                    <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                       Preco de venda
                     </th>
-                    <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                       Margem bruta
                     </th>
-                    <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                       Previsao de esgotamento
                     </th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {topProdutos.map((produto) => (
                     <tr
-                      className="transition hover:bg-slate-50"
+                      className="transition hover:bg-slate-50 dark:hover:bg-slate-800/60"
                       key={produto.id}
                     >
-                      <td className="min-w-52 px-3 py-3 text-sm font-semibold text-slate-950">
+                      <td className="min-w-52 px-3 py-3 text-sm font-semibold text-slate-950 dark:text-slate-100">
                         {produto.nomeCompleto}
                       </td>
-                      <td className="whitespace-nowrap px-3 py-3 text-sm font-semibold text-slate-950">
+                      <td className="whitespace-nowrap px-3 py-3 text-sm font-semibold text-slate-950 dark:text-slate-100">
                         {produto.quantidade}
                       </td>
-                      <td className="whitespace-nowrap px-3 py-3 text-sm text-slate-700">
+                      <td className="whitespace-nowrap px-3 py-3 text-sm text-slate-700 dark:text-slate-300">
                         {currencyFormatter.format(produto.precoCusto)}
                       </td>
-                      <td className="whitespace-nowrap px-3 py-3 text-sm text-slate-700">
+                      <td className="whitespace-nowrap px-3 py-3 text-sm text-slate-700 dark:text-slate-300">
                         {currencyFormatter.format(produto.precoVenda)}
                       </td>
                       <td className="whitespace-nowrap px-3 py-3 text-sm font-semibold text-emerald-700">
                         {formatPercent(produto.margemBruta)}
                       </td>
-                      <td className="whitespace-nowrap px-3 py-3 text-sm text-slate-700">
+                      <td className="whitespace-nowrap px-3 py-3 text-sm text-slate-700 dark:text-slate-300">
                         {formatarPrevisao(previsoesPorProdutoId.get(produto.id))}
                       </td>
                     </tr>
@@ -1244,30 +1295,30 @@ function DashboardEstoque({ estatisticas, previsoes, produtos }) {
         </div>
 
         <aside className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
-          <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+          <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
               Patrimonio / estoque
             </p>
-            <p className="mt-1 text-sm font-medium text-slate-500">
+            <p className="mt-1 text-sm font-medium text-slate-500 dark:text-slate-400">
               Valor investido parado
             </p>
-            <p className="mt-2 text-3xl font-semibold text-slate-950">
+            <p className="mt-2 text-3xl font-semibold text-slate-950 dark:text-slate-100">
               {currencyFormatter.format(valorInvestidoEstoque)}
             </p>
-            <p className="mt-2 text-xs text-slate-500">
+            <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
               {produtos.length} produtos cadastrados
             </p>
           </div>
-          <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-sm font-medium text-slate-500">
+          <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+            <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
               Itens em estoque
             </p>
             <p className="mt-2 text-3xl font-semibold text-cyan-700">
               {totalItens}
             </p>
           </div>
-          <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-sm font-medium text-slate-500">Atencao</p>
+          <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+            <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Atencao</p>
             <p className="mt-2 text-3xl font-semibold text-amber-600">
               {produtosBaixos}
             </p>
@@ -1331,14 +1382,14 @@ function TabelaProdutos({ isAdmin, produtos, onDelete, onEdit }) {
   }
 
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+    <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-900">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <CardTitle eyebrow="Inventario" title="Estoque atual" />
 
         <div className="flex w-full flex-col gap-2 sm:flex-row lg:max-w-xl">
           <div className="grid gap-2 sm:grid-cols-2">
             <button
-              className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-cyan-100 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-cyan-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800 dark:focus:ring-cyan-900/60"
               type="button"
               onClick={handleExportExcel}
               disabled={produtos.length === 0}
@@ -1346,7 +1397,7 @@ function TabelaProdutos({ isAdmin, produtos, onDelete, onEdit }) {
               Exportar Excel
             </button>
             <button
-              className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-cyan-100 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-cyan-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800 dark:focus:ring-cyan-900/60"
               type="button"
               onClick={handleExportCsv}
               disabled={produtos.length === 0}
@@ -1362,7 +1413,7 @@ function TabelaProdutos({ isAdmin, produtos, onDelete, onEdit }) {
             </span>
             <input
               aria-describedby="busca-produto-ajuda"
-              className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
+              className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-cyan-500 dark:focus:ring-cyan-900/60"
               value={busca}
               onChange={(event) => setBusca(event.target.value)}
               placeholder="Buscar por nome..."
@@ -1373,70 +1424,70 @@ function TabelaProdutos({ isAdmin, produtos, onDelete, onEdit }) {
 
       <div className="mt-1 overflow-x-auto">
         {produtos.length === 0 ? (
-          <div className="flex min-h-44 items-center justify-center rounded-md border border-dashed border-slate-300 bg-slate-50 px-4 text-center text-sm text-slate-500">
+          <div className="flex min-h-44 items-center justify-center rounded-md border border-dashed border-slate-300 bg-slate-50 px-4 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-400">
             Nenhum produto cadastrado ainda.
           </div>
         ) : produtosFiltrados.length === 0 ? (
-          <div className="flex min-h-44 items-center justify-center rounded-md border border-dashed border-slate-300 bg-slate-50 px-4 text-center text-sm text-slate-500">
+          <div className="flex min-h-44 items-center justify-center rounded-md border border-dashed border-slate-300 bg-slate-50 px-4 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-400">
             Nenhum produto encontrado para a busca informada.
           </div>
         ) : (
-          <table className="min-w-full divide-y divide-slate-200">
+          <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800">
             <thead>
               <tr>
-                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                   ID
                 </th>
-                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                   Produto
                 </th>
-                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                   Custo
                 </th>
-                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                   Venda
                 </th>
-                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                   Margem
                 </th>
-                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                   Estoque
                 </th>
-                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                   Status
                 </th>
                 {isAdmin && (
-                  <th className="px-3 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <th className="px-3 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                     Acoes
                   </th>
                 )}
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {produtosFiltrados.map((produto) => {
                 const status = getStatus(produto);
 
                 return (
                   <tr
-                    className="transition hover:bg-slate-50"
+                    className="transition hover:bg-slate-50 dark:hover:bg-slate-800/60"
                     key={produto.id}
                   >
-                    <td className="whitespace-nowrap px-3 py-3 text-sm font-medium text-slate-500">
+                    <td className="whitespace-nowrap px-3 py-3 text-sm font-medium text-slate-500 dark:text-slate-400">
                       #{produto.id}
                     </td>
-                    <td className="min-w-52 px-3 py-3 text-sm font-semibold text-slate-950">
+                    <td className="min-w-52 px-3 py-3 text-sm font-semibold text-slate-950 dark:text-slate-100">
                       {produto.nome}
                     </td>
-                    <td className="whitespace-nowrap px-3 py-3 text-sm text-slate-700">
+                    <td className="whitespace-nowrap px-3 py-3 text-sm text-slate-700 dark:text-slate-300">
                       {currencyFormatter.format(produto.preco_custo)}
                     </td>
-                    <td className="whitespace-nowrap px-3 py-3 text-sm text-slate-700">
+                    <td className="whitespace-nowrap px-3 py-3 text-sm text-slate-700 dark:text-slate-300">
                       {currencyFormatter.format(produto.preco_venda)}
                     </td>
                     <td className="whitespace-nowrap px-3 py-3 text-sm font-semibold text-emerald-700">
                       {formatPercent(calcularMargemBruta(produto))}
                     </td>
-                    <td className="whitespace-nowrap px-3 py-3 text-sm font-semibold text-slate-950">
+                    <td className="whitespace-nowrap px-3 py-3 text-sm font-semibold text-slate-950 dark:text-slate-100">
                       {produto.quantidade_atual}
                     </td>
                     <td className="whitespace-nowrap px-3 py-3">
@@ -1450,14 +1501,14 @@ function TabelaProdutos({ isAdmin, produtos, onDelete, onEdit }) {
                       <td className="whitespace-nowrap px-3 py-3">
                         <div className="flex justify-end gap-2">
                           <button
-                            className="rounded-md border border-cyan-200 bg-cyan-50 px-2.5 py-1.5 text-xs font-semibold text-cyan-700 transition hover:bg-cyan-100 focus:outline-none focus:ring-4 focus:ring-cyan-100"
+                            className="rounded-md border border-cyan-200 bg-cyan-50 px-2.5 py-1.5 text-xs font-semibold text-cyan-700 transition hover:bg-cyan-100 focus:outline-none focus:ring-4 focus:ring-cyan-100 dark:border-cyan-900/70 dark:bg-cyan-950/40 dark:text-cyan-300 dark:hover:bg-cyan-900/50 dark:focus:ring-cyan-900/60"
                             type="button"
                             onClick={() => onEdit(produto)}
                           >
                             Editar
                           </button>
                           <button
-                            className="rounded-md border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs font-semibold text-red-700 transition hover:bg-red-100 focus:outline-none focus:ring-4 focus:ring-red-100"
+                            className="rounded-md border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs font-semibold text-red-700 transition hover:bg-red-100 focus:outline-none focus:ring-4 focus:ring-red-100 dark:border-red-900/70 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-900/50 dark:focus:ring-red-900/60"
                             type="button"
                             onClick={() => onDelete(produto)}
                           >
@@ -1495,34 +1546,34 @@ function HistoricoMovimentacoes({ movimentacoes }) {
 
   return (
     <section
-      className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm"
+      className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-900"
       id="historico"
     >
       <CardTitle eyebrow="Auditoria" title="Historico de movimentacoes" />
 
       {movimentacoes.length > 0 && (
         <div className="mb-5 grid gap-3 sm:grid-cols-3">
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-950">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
               Valor bruto
             </p>
-            <p className="mt-1 text-xl font-semibold text-slate-950">
+            <p className="mt-1 text-xl font-semibold text-slate-950 dark:text-slate-100">
               {currencyFormatter.format(totais.valorBruto)}
             </p>
           </div>
-          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/70 dark:bg-amber-950/40">
+            <p className="text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
               Impostos e taxas
             </p>
-            <p className="mt-1 text-xl font-semibold text-amber-700">
+            <p className="mt-1 text-xl font-semibold text-amber-700 dark:text-amber-300">
               {currencyFormatter.format(totais.impostos)}
             </p>
           </div>
-          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-900/70 dark:bg-emerald-950/40">
+            <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
               Lucro liquido
             </p>
-            <p className="mt-1 text-xl font-semibold text-emerald-700">
+            <p className="mt-1 text-xl font-semibold text-emerald-700 dark:text-emerald-300">
               {currencyFormatter.format(totais.lucroLiquido)}
             </p>
           </div>
@@ -1531,57 +1582,57 @@ function HistoricoMovimentacoes({ movimentacoes }) {
 
       <div className="overflow-x-auto">
         {movimentacoes.length === 0 ? (
-          <div className="flex min-h-36 items-center justify-center rounded-md border border-dashed border-slate-300 bg-slate-50 px-4 text-center text-sm text-slate-500">
+          <div className="flex min-h-36 items-center justify-center rounded-md border border-dashed border-slate-300 bg-slate-50 px-4 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-400">
             Nenhuma movimentacao registrada ainda.
           </div>
         ) : (
-          <table className="min-w-full divide-y divide-slate-200">
+          <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800">
             <thead>
               <tr>
-                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                   Data/Hora
                 </th>
-                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                   Produto
                 </th>
-                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                   Tipo
                 </th>
-                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                   Status
                 </th>
-                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                   Quantidade
                 </th>
-                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                   Bruto
                 </th>
-                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                   Impostos
                 </th>
-                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                   Lucro liquido
                 </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {movimentacoes.map((movimentacao) => (
                 <tr
-                  className="transition hover:bg-slate-50"
+                  className="transition hover:bg-slate-50 dark:hover:bg-slate-800/60"
                   key={movimentacao.id}
                 >
-                  <td className="whitespace-nowrap px-3 py-3 text-sm text-slate-600">
+                  <td className="whitespace-nowrap px-3 py-3 text-sm text-slate-600 dark:text-slate-400">
                     {formatDate(movimentacao.data_hora)}
                   </td>
-                  <td className="min-w-52 px-3 py-3 text-sm font-semibold text-slate-950">
+                  <td className="min-w-52 px-3 py-3 text-sm font-semibold text-slate-950 dark:text-slate-100">
                     {movimentacao.produto_nome}
                   </td>
                   <td className="whitespace-nowrap px-3 py-3">
                     <span
                       className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${
                         movimentacao.tipo === "entrada"
-                          ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
-                          : "bg-red-50 text-red-700 ring-red-200"
+                          ? "bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:ring-emerald-900"
+                          : "bg-red-50 text-red-700 ring-red-200 dark:bg-red-950/50 dark:text-red-300 dark:ring-red-900"
                       }`}
                     >
                       {movimentacao.tipo === "entrada" ? "Entrada" : "Saida"}
@@ -1596,10 +1647,10 @@ function HistoricoMovimentacoes({ movimentacoes }) {
                       {getVendaStatusLabel(movimentacao.status)}
                     </span>
                   </td>
-                  <td className="whitespace-nowrap px-3 py-3 text-sm font-semibold text-slate-950">
+                  <td className="whitespace-nowrap px-3 py-3 text-sm font-semibold text-slate-950 dark:text-slate-100">
                     {movimentacao.quantidade}
                   </td>
-                  <td className="whitespace-nowrap px-3 py-3 text-sm text-slate-700">
+                  <td className="whitespace-nowrap px-3 py-3 text-sm text-slate-700 dark:text-slate-300">
                     {currencyFormatter.format(
                       movimentacao.valor_bruto_total ?? 0,
                     )}
@@ -1672,7 +1723,7 @@ function EditarProdutoModal({ onClose, onSaved, produto }) {
       <form
         aria-labelledby="editar-produto-title"
         aria-modal="true"
-        className="w-full max-w-2xl rounded-lg border border-slate-200 bg-white p-6 shadow-xl"
+        className="w-full max-w-2xl rounded-lg border border-slate-200 bg-white p-6 shadow-xl dark:border-slate-700 dark:bg-slate-900"
         onSubmit={handleSubmit}
         ref={dialogRef}
         role="dialog"
@@ -1686,10 +1737,10 @@ function EditarProdutoModal({ onClose, onSaved, produto }) {
 
         <div className="space-y-4">
           <label className="block" htmlFor="editar-produto-nome">
-            <span className="text-sm font-medium text-slate-700">Nome</span>
+            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Nome</span>
             <input
               id="editar-produto-nome"
-              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
+              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-cyan-500 dark:focus:ring-cyan-900/60"
               value={nome}
               onChange={(event) => setNome(event.target.value)}
               required
@@ -1698,12 +1749,12 @@ function EditarProdutoModal({ onClose, onSaved, produto }) {
 
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="block" htmlFor="editar-produto-preco-custo">
-              <span className="text-sm font-medium text-slate-700">
+              <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
                 Preco de custo
               </span>
               <input
                 id="editar-produto-preco-custo"
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
+                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-cyan-500 dark:focus:ring-cyan-900/60"
                 type="number"
                 step="0.01"
                 min="0"
@@ -1714,12 +1765,12 @@ function EditarProdutoModal({ onClose, onSaved, produto }) {
             </label>
 
             <label className="block" htmlFor="editar-produto-preco-venda">
-              <span className="text-sm font-medium text-slate-700">
+              <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
                 Preco de venda
               </span>
               <input
                 id="editar-produto-preco-venda"
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
+                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-cyan-500 dark:focus:ring-cyan-900/60"
                 type="number"
                 step="0.01"
                 min="0.01"
@@ -1730,12 +1781,12 @@ function EditarProdutoModal({ onClose, onSaved, produto }) {
             </label>
 
             <label className="block" htmlFor="editar-produto-imposto">
-              <span className="text-sm font-medium text-slate-700">
+              <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
                 % Imposto
               </span>
               <input
                 id="editar-produto-imposto"
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
+                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-cyan-500 dark:focus:ring-cyan-900/60"
                 type="number"
                 step="0.01"
                 min="0"
@@ -1746,12 +1797,12 @@ function EditarProdutoModal({ onClose, onSaved, produto }) {
             </label>
 
             <label className="block" htmlFor="editar-produto-taxa-operacional">
-              <span className="text-sm font-medium text-slate-700">
+              <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
                 % Taxa
               </span>
               <input
                 id="editar-produto-taxa-operacional"
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
+                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-cyan-500 dark:focus:ring-cyan-900/60"
                 type="number"
                 step="0.01"
                 min="0"
@@ -1765,12 +1816,12 @@ function EditarProdutoModal({ onClose, onSaved, produto }) {
           </div>
 
           <label className="block" htmlFor="editar-produto-estoque-minimo">
-            <span className="text-sm font-medium text-slate-700">
+            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
               Estoque minimo
             </span>
             <input
               id="editar-produto-estoque-minimo"
-              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
+              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-cyan-500 dark:focus:ring-cyan-900/60"
               type="number"
               min="0"
               value={estoqueMinimo}
@@ -1781,7 +1832,7 @@ function EditarProdutoModal({ onClose, onSaved, produto }) {
 
           <div className="flex justify-end gap-2 pt-2">
             <button
-              className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-cyan-100"
+              className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-cyan-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800 dark:focus:ring-cyan-900/60"
               type="button"
               onClick={onClose}
               disabled={loading}
@@ -1821,7 +1872,7 @@ function ExcluirProdutoModal({ onClose, onConfirm, produto }) {
         aria-describedby="excluir-produto-descricao"
         aria-labelledby="excluir-produto-title"
         aria-modal="true"
-        className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-xl"
+        className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-xl dark:border-slate-700 dark:bg-slate-900"
         ref={dialogRef}
         role="dialog"
         tabIndex={-1}
@@ -1831,15 +1882,15 @@ function ExcluirProdutoModal({ onClose, onConfirm, produto }) {
           title="Excluir produto"
           titleId="excluir-produto-title"
         />
-        <p className="text-sm text-slate-600" id="excluir-produto-descricao">
+        <p className="text-sm text-slate-600 dark:text-slate-400" id="excluir-produto-descricao">
           Esta acao remove o produto{" "}
-          <span className="font-semibold text-slate-950">{produto.nome}</span> e
+          <span className="font-semibold text-slate-950 dark:text-slate-100">{produto.nome}</span> e
           suas movimentacoes vinculadas.
         </p>
 
         <div className="mt-6 flex justify-end gap-2">
           <button
-            className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-cyan-100"
+            className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-cyan-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800 dark:focus:ring-cyan-900/60"
             type="button"
             onClick={onClose}
             disabled={loading}
@@ -1889,7 +1940,7 @@ function AssistenteIAModal({ onClose, onSaved }) {
       <form
         aria-labelledby="assistente-ia-title"
         aria-modal="true"
-        className="w-full max-w-lg rounded-lg border border-slate-200 bg-white p-6 shadow-xl"
+        className="w-full max-w-lg rounded-lg border border-slate-200 bg-white p-6 shadow-xl dark:border-slate-700 dark:bg-slate-900"
         onSubmit={handleSubmit}
         ref={dialogRef}
         role="dialog"
@@ -1902,12 +1953,12 @@ function AssistenteIAModal({ onClose, onSaved }) {
         />
 
         <label className="block" htmlFor="assistente-ia-texto">
-          <span className="text-sm font-medium text-slate-700">
+          <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
             Descreva a movimentacao
           </span>
           <textarea
             id="assistente-ia-texto"
-            className="mt-1 min-h-32 w-full resize-y rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
+            className="mt-1 min-h-32 w-full resize-y rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-cyan-500 dark:focus:ring-cyan-900/60"
             value={texto}
             onChange={(event) => setTexto(event.target.value)}
             required
@@ -1917,7 +1968,7 @@ function AssistenteIAModal({ onClose, onSaved }) {
 
         <div className="mt-6 flex justify-end gap-2">
           <button
-            className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-cyan-100"
+            className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-cyan-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800 dark:focus:ring-cyan-900/60"
             type="button"
             onClick={onClose}
             disabled={loading}
@@ -1959,29 +2010,29 @@ function LoginPage({ onLogin }) {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-100 px-4 py-10">
+    <div className="flex min-h-screen items-center justify-center bg-slate-100 px-4 py-10 transition-colors dark:bg-slate-950">
       <form
-        className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-8 shadow-sm"
+        className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-8 shadow-sm dark:border-slate-700 dark:bg-slate-900"
         onSubmit={handleSubmit}
       >
         <div className="mb-8">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-700">
             GestorDeEstoque
           </p>
-          <h1 className="mt-2 text-2xl font-semibold text-slate-950">
+          <h1 className="mt-2 text-2xl font-semibold text-slate-950 dark:text-slate-100">
             Acessar painel
           </h1>
-          <p className="mt-2 text-sm text-slate-500">
+          <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
             Entre com seu usuario para gerenciar o estoque.
           </p>
         </div>
 
         <div className="space-y-4">
           <label className="block" htmlFor="login-usuario">
-            <span className="text-sm font-medium text-slate-700">Usuario</span>
+            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Usuario</span>
             <input
               id="login-usuario"
-              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
+              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-cyan-500 dark:focus:ring-cyan-900/60"
               value={username}
               onChange={(event) => setUsername(event.target.value)}
               required
@@ -1990,10 +2041,10 @@ function LoginPage({ onLogin }) {
           </label>
 
           <label className="block" htmlFor="login-senha">
-            <span className="text-sm font-medium text-slate-700">Senha</span>
+            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Senha</span>
             <input
               id="login-senha"
-              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
+              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-cyan-500 dark:focus:ring-cyan-900/60"
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
@@ -2035,10 +2086,10 @@ const navItems = [
 ];
 
 function getNavLinkClass({ isActive }) {
-  return `rounded-md px-3 py-2 transition focus:outline-none focus:ring-4 focus:ring-cyan-100 ${
+  return `rounded-md px-3 py-2 transition focus:outline-none focus:ring-4 focus:ring-cyan-100 dark:focus:ring-cyan-900/60 ${
     isActive
-      ? "bg-slate-950 text-white"
-      : "text-slate-600 hover:bg-slate-100 hover:text-slate-950"
+      ? "bg-slate-950 text-white dark:bg-cyan-500 dark:text-slate-950"
+      : "text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
   }`;
 }
 
@@ -2051,7 +2102,7 @@ function AlertasButton({ alertas }) {
       <button
         aria-expanded={isOpen}
         aria-label={`Alertas de estoque: ${alertasCount}`}
-        className="relative inline-flex h-10 w-10 items-center justify-center rounded-md border border-slate-300 text-slate-600 transition hover:bg-slate-100 hover:text-slate-950 focus:outline-none focus:ring-4 focus:ring-cyan-100"
+        className="relative inline-flex h-10 w-10 items-center justify-center rounded-md border border-slate-300 text-slate-600 transition hover:bg-slate-100 hover:text-slate-950 focus:outline-none focus:ring-4 focus:ring-cyan-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white dark:focus:ring-cyan-900/60"
         type="button"
         onClick={() => setIsOpen((current) => !current)}
       >
@@ -2064,25 +2115,25 @@ function AlertasButton({ alertas }) {
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 z-30 mt-2 w-80 rounded-lg border border-slate-200 bg-white p-4 shadow-xl">
-          <p className="text-sm font-semibold text-slate-950">
+        <div className="absolute right-0 z-30 mt-2 w-80 rounded-lg border border-slate-200 bg-white p-4 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+          <p className="text-sm font-semibold text-slate-950 dark:text-slate-100">
             Alertas de estoque
           </p>
           {alertasCount === 0 ? (
-            <p className="mt-3 text-sm text-slate-500">
+            <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">
               Nenhum alerta pendente.
             </p>
           ) : (
             <ul className="mt-3 grid max-h-72 gap-3 overflow-y-auto">
               {alertas.map((alerta) => (
                 <li
-                  className="rounded-md border border-red-100 bg-red-50 px-3 py-2"
+                  className="rounded-md border border-red-100 bg-red-50 px-3 py-2 dark:border-red-900/70 dark:bg-red-950/40"
                   key={alerta.id}
                 >
-                  <p className="text-sm font-semibold text-red-700">
+                  <p className="text-sm font-semibold text-red-700 dark:text-red-300">
                     {alerta.produto_nome}
                   </p>
-                  <p className="mt-1 text-xs leading-5 text-red-700">
+                  <p className="mt-1 text-xs leading-5 text-red-700 dark:text-red-300">
                     {alerta.mensagem}
                   </p>
                 </li>
@@ -2095,15 +2146,42 @@ function AlertasButton({ alertas }) {
   );
 }
 
-function AppHeader({ alertas, isAdmin, onLogout, onOpenAssistant, user }) {
+function ThemeToggleButton({ isDarkMode, onToggleTheme }) {
+  return (
+    <button
+      aria-label={
+        isDarkMode ? "Ativar modo claro" : "Ativar modo escuro"
+      }
+      className="relative inline-flex h-10 w-10 items-center justify-center rounded-md border border-slate-300 text-slate-600 transition hover:bg-slate-100 hover:text-slate-950 focus:outline-none focus:ring-4 focus:ring-cyan-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white dark:focus:ring-cyan-900/60"
+      type="button"
+      onClick={onToggleTheme}
+    >
+      {isDarkMode ? (
+        <Sun className="h-4 w-4" aria-hidden="true" />
+      ) : (
+        <Moon className="h-4 w-4" aria-hidden="true" />
+      )}
+    </button>
+  );
+}
+
+function AppHeader({
+  alertas,
+  isAdmin,
+  isDarkMode,
+  onLogout,
+  onOpenAssistant,
+  onToggleTheme,
+  user,
+}) {
   const visibleNavItems = navItems.filter(
     (item) => item.to !== "/historico" || isAdmin,
   );
 
   return (
-    <header className="border-b border-slate-200 bg-white">
+    <header className="border-b border-slate-200 bg-white transition-colors dark:border-slate-800 dark:bg-slate-950">
       <a
-        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:font-semibold focus:text-cyan-700 focus:shadow"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:font-semibold focus:text-cyan-700 focus:shadow dark:focus:bg-slate-900 dark:focus:text-cyan-300"
         href="#conteudo-principal"
       >
         Ir para o conteudo
@@ -2114,7 +2192,7 @@ function AppHeader({ alertas, isAdmin, onLogout, onOpenAssistant, user }) {
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-700">
             GestorDeEstoque
           </p>
-          <h1 className="mt-1 text-2xl font-semibold text-slate-950">
+          <h1 className="mt-1 text-2xl font-semibold text-slate-950 dark:text-slate-100">
             Controle de inventario
           </h1>
         </div>
@@ -2134,7 +2212,7 @@ function AppHeader({ alertas, isAdmin, onLogout, onOpenAssistant, user }) {
             </NavLink>
           ))}
           <button
-            className="inline-flex items-center gap-2 rounded-md border border-cyan-200 bg-cyan-50 px-3 py-2 text-cyan-700 transition hover:bg-cyan-100 focus:outline-none focus:ring-4 focus:ring-cyan-100"
+            className="inline-flex items-center gap-2 rounded-md border border-cyan-200 bg-cyan-50 px-3 py-2 text-cyan-700 transition hover:bg-cyan-100 focus:outline-none focus:ring-4 focus:ring-cyan-100 dark:border-cyan-900/70 dark:bg-cyan-950/40 dark:text-cyan-300 dark:hover:bg-cyan-900/50 dark:focus:ring-cyan-900/60"
             type="button"
             onClick={onOpenAssistant}
           >
@@ -2142,13 +2220,17 @@ function AppHeader({ alertas, isAdmin, onLogout, onOpenAssistant, user }) {
             Comando IA
           </button>
           <AlertasButton alertas={alertas} />
+          <ThemeToggleButton
+            isDarkMode={isDarkMode}
+            onToggleTheme={onToggleTheme}
+          />
           {user && (
-            <span className="inline-flex items-center rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-600">
+            <span className="inline-flex items-center rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
               {user.username} - {formatRole(user.role)}
             </span>
           )}
           <button
-            className="rounded-md border border-slate-300 px-3 py-2 text-slate-600 transition hover:bg-slate-100 hover:text-slate-950 focus:outline-none focus:ring-4 focus:ring-cyan-100"
+            className="rounded-md border border-slate-300 px-3 py-2 text-slate-600 transition hover:bg-slate-100 hover:text-slate-950 focus:outline-none focus:ring-4 focus:ring-cyan-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white dark:focus:ring-cyan-900/60"
             type="button"
             onClick={onLogout}
           >
@@ -2172,7 +2254,7 @@ function PageLayout({ children, erroGlobal, isLoadingDados }) {
     >
       {erroGlobal && (
         <div
-          className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700"
+          className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700 dark:border-red-900/70 dark:bg-red-950/40 dark:text-red-300"
           role="alert"
         >
           {erroGlobal}
@@ -2182,7 +2264,7 @@ function PageLayout({ children, erroGlobal, isLoadingDados }) {
       {isLoadingDados && (
         <div
           aria-live="polite"
-          className="inline-flex items-center gap-2 rounded-lg border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm font-medium text-cyan-700"
+          className="inline-flex items-center gap-2 rounded-lg border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm font-medium text-cyan-700 dark:border-cyan-900/70 dark:bg-cyan-950/40 dark:text-cyan-300"
           role="status"
         >
           <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
@@ -2195,10 +2277,11 @@ function PageLayout({ children, erroGlobal, isLoadingDados }) {
   );
 }
 
-function DashboardPage({ estatisticas, previsoes, produtos }) {
+function DashboardPage({ estatisticas, isDarkMode, previsoes, produtos }) {
   return (
     <DashboardEstoque
       estatisticas={estatisticas}
+      isDarkMode={isDarkMode}
       previsoes={previsoes}
       produtos={produtos}
     />
@@ -2238,6 +2321,7 @@ function HistoricoPage({ movimentacoes }) {
 function AppRoutes({
   erroGlobal,
   estatisticasDashboard,
+  isDarkMode,
   isAdmin,
   isLoadingDados,
   movimentacoes,
@@ -2255,6 +2339,7 @@ function AppRoutes({
           element={
             <DashboardPage
               estatisticas={estatisticasDashboard}
+              isDarkMode={isDarkMode}
               previsoes={previsoes}
               produtos={produtos}
             />
@@ -2304,6 +2389,7 @@ export default function App() {
   const [produtoEditando, setProdutoEditando] = useState(null);
   const [produtoExcluindo, setProdutoExcluindo] = useState(null);
   const [produtos, setProdutos] = useState([]);
+  const { isDarkMode, toggleTheme } = useTheme();
   const authUser = useMemo(() => decodeAuthToken(authToken), [authToken]);
   const isAdmin = authUser?.role === "admin";
 
@@ -2388,18 +2474,21 @@ export default function App() {
 
   return (
     <BrowserRouter>
-      <div className="min-h-screen bg-slate-100 text-slate-950">
+      <div className="min-h-screen bg-slate-100 text-slate-950 transition-colors dark:bg-slate-950 dark:text-slate-100">
         <AppHeader
           alertas={alertas}
           isAdmin={isAdmin}
+          isDarkMode={isDarkMode}
           onLogout={handleLogout}
           onOpenAssistant={() => setAssistenteAberto(true)}
+          onToggleTheme={toggleTheme}
           user={authUser}
         />
 
         <AppRoutes
           erroGlobal={erroGlobal}
           estatisticasDashboard={estatisticasDashboard}
+          isDarkMode={isDarkMode}
           isAdmin={isAdmin}
           isLoadingDados={isLoadingDados}
           movimentacoes={movimentacoes}
