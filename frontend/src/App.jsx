@@ -102,6 +102,28 @@ function formatarPrevisao(previsao) {
   return `${previsao.dias_para_esgotar} dia(s)`;
 }
 
+function getVendaStatusLabel(statusVenda) {
+  const labels = {
+    orcamento: "Orcamento",
+    pendente: "Aguardando confirmacao",
+    concluido: "Concluido",
+  };
+
+  return labels[statusVenda] ?? "Concluido";
+}
+
+function getVendaStatusClasses(statusVenda) {
+  if (statusVenda === "orcamento") {
+    return "bg-teal-50 text-teal-700 ring-teal-200";
+  }
+
+  if (statusVenda === "pendente") {
+    return "bg-red-50 text-red-700 ring-red-200";
+  }
+
+  return "bg-blue-50 text-blue-700 ring-blue-200";
+}
+
 function LoadingLabel({ text }) {
   return (
     <span className="inline-flex items-center justify-center gap-2">
@@ -877,6 +899,7 @@ function FormProduto({ onSaved }) {
 
 function FormMovimentacao({ produtos, onSaved }) {
   const [produtoId, setProdutoId] = useState("");
+  const [statusVenda, setStatusVenda] = useState("concluido");
   const [tipo, setTipo] = useState("entrada");
   const [qtd, setQtd] = useState("");
   const [loading, setLoading] = useState(false);
@@ -890,6 +913,7 @@ function FormMovimentacao({ produtos, onSaved }) {
         produto_id: parseInt(produtoId, 10),
         tipo,
         quantidade: parseInt(qtd, 10),
+        status: tipo === "saida" ? statusVenda : "concluido",
       });
 
       setQtd("");
@@ -973,6 +997,25 @@ function FormMovimentacao({ produtos, onSaved }) {
           </div>
         </fieldset>
 
+        {tipo === "saida" && (
+          <label className="block" htmlFor="movimentacao-status-venda">
+            <span className="text-sm font-medium text-slate-700">
+              Status da venda
+            </span>
+            <select
+              id="movimentacao-status-venda"
+              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
+              value={statusVenda}
+              onChange={(event) => setStatusVenda(event.target.value)}
+              required
+            >
+              <option value="orcamento">Orcamento</option>
+              <option value="pendente">Aguardando Confirmacao</option>
+              <option value="concluido">Concluido</option>
+            </select>
+          </label>
+        )}
+
         <label className="block" htmlFor="movimentacao-quantidade">
           <span className="text-sm font-medium text-slate-700">Quantidade</span>
           <input
@@ -1035,148 +1078,203 @@ function DashboardEstoque({ estatisticas, previsoes, produtos }) {
     (total, produto) => total + produto.quantidade_atual,
     0,
   );
+  const valorInvestidoEstoque = produtos.reduce(
+    (total, produto) =>
+      total + asNumber(produto.preco_custo) * produto.quantidade_atual,
+    0,
+  );
   const produtosBaixos = produtos.filter(
     (produto) => produto.quantidade_atual <= (produto.estoque_minimo ?? 5),
   ).length;
+  const kpisComerciais = [
+    {
+      label: "Total Vendas",
+      value: currencyFormatter.format(estatisticas?.total_vendas ?? 0),
+      description: `${estatisticas?.qtd_vendas ?? 0} vendas realizadas`,
+      classes: "border-blue-200 bg-blue-50 text-blue-700",
+    },
+    {
+      label: "Total Liquido",
+      value: currencyFormatter.format(estatisticas?.total_liquido ?? 0),
+      description: "Receita menos custos e impostos",
+      classes: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    },
+    {
+      label: "Orcamentos",
+      value: currencyFormatter.format(estatisticas?.total_orcamentos ?? 0),
+      description: `${estatisticas?.qtd_orcamentos ?? 0} oportunidades abertas`,
+      classes: "border-teal-200 bg-teal-50 text-teal-700",
+    },
+    {
+      label: "Pedidos sem Confirmacao",
+      value: estatisticas?.pedidos_sem_confirmacao ?? 0,
+      description: "Saidas pendentes travando estoque",
+      classes: "border-red-200 bg-red-50 text-red-700",
+    },
+  ];
 
   return (
-    <section className="grid gap-4 lg:grid-cols-[1fr_320px]">
-      <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-          <CardTitle eyebrow="Dashboard" title="Top 5 produtos em estoque" />
-          <p className="text-sm text-slate-500">
-            Ordenado por quantidade atual
-          </p>
-        </div>
+    <div className="grid gap-5">
+      <section
+        aria-label="Indicadores comerciais"
+        className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
+      >
+        {kpisComerciais.map((kpi) => (
+          <div
+            className={`rounded-lg border p-5 shadow-sm ${kpi.classes}`}
+            key={kpi.label}
+          >
+            <p className="text-xs font-semibold uppercase tracking-wide">
+              {kpi.label}
+            </p>
+            <p className="mt-2 text-3xl font-semibold text-slate-950">
+              {kpi.value}
+            </p>
+            <p className="mt-1 text-sm font-medium text-slate-600">
+              {kpi.description}
+            </p>
+          </div>
+        ))}
+      </section>
 
-        <div className="h-72">
-          {topProdutos.length > 0 ? (
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={topProdutos} margin={{ left: -20, right: 8 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis
-                  dataKey="nome"
-                  tick={{ fill: "#475569", fontSize: 12 }}
-                  tickLine={false}
-                  axisLine={{ stroke: "#cbd5e1" }}
-                />
-                <YAxis
-                  allowDecimals={false}
-                  tick={{ fill: "#475569", fontSize: 12 }}
-                  tickLine={false}
-                  axisLine={{ stroke: "#cbd5e1" }}
-                />
-                <Tooltip
-                  cursor={{ fill: "rgba(14, 165, 233, 0.08)" }}
-                  contentStyle={{
-                    border: "1px solid #e2e8f0",
-                    borderRadius: "8px",
-                    boxShadow: "0 12px 30px rgba(15, 23, 42, 0.12)",
-                  }}
-                  formatter={(value) => [`${value} unidades`, "Estoque"]}
-                />
-                <Bar
-                  dataKey="quantidade"
-                  fill="#0e7490"
-                  radius={[6, 6, 0, 0]}
-                />
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="flex h-full items-center justify-center rounded-md border border-dashed border-slate-300 bg-slate-50 text-sm text-slate-500">
-              Cadastre produtos para visualizar o ranking.
+      <section className="grid gap-4 lg:grid-cols-[1fr_320px]">
+        <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+            <CardTitle eyebrow="Dashboard" title="Top 5 produtos em estoque" />
+            <p className="text-sm text-slate-500">
+              Ordenado por quantidade atual
+            </p>
+          </div>
+
+          <div className="h-72">
+            {topProdutos.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={topProdutos} margin={{ left: -20, right: 8 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <XAxis
+                    dataKey="nome"
+                    tick={{ fill: "#475569", fontSize: 12 }}
+                    tickLine={false}
+                    axisLine={{ stroke: "#cbd5e1" }}
+                  />
+                  <YAxis
+                    allowDecimals={false}
+                    tick={{ fill: "#475569", fontSize: 12 }}
+                    tickLine={false}
+                    axisLine={{ stroke: "#cbd5e1" }}
+                  />
+                  <Tooltip
+                    cursor={{ fill: "rgba(14, 165, 233, 0.08)" }}
+                    contentStyle={{
+                      border: "1px solid #e2e8f0",
+                      borderRadius: "8px",
+                      boxShadow: "0 12px 30px rgba(15, 23, 42, 0.12)",
+                    }}
+                    formatter={(value) => [`${value} unidades`, "Estoque"]}
+                  />
+                  <Bar
+                    dataKey="quantidade"
+                    fill="#0e7490"
+                    radius={[6, 6, 0, 0]}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex h-full items-center justify-center rounded-md border border-dashed border-slate-300 bg-slate-50 text-sm text-slate-500">
+                Cadastre produtos para visualizar o ranking.
+              </div>
+            )}
+          </div>
+
+          {topProdutos.length > 0 && (
+            <div className="mt-5 overflow-x-auto">
+              <table className="min-w-full divide-y divide-slate-200">
+                <thead>
+                  <tr>
+                    <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Produto
+                    </th>
+                    <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Estoque
+                    </th>
+                    <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Preco de custo
+                    </th>
+                    <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Preco de venda
+                    </th>
+                    <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Margem bruta
+                    </th>
+                    <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Previsao de esgotamento
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {topProdutos.map((produto) => (
+                    <tr
+                      className="transition hover:bg-slate-50"
+                      key={produto.id}
+                    >
+                      <td className="min-w-52 px-3 py-3 text-sm font-semibold text-slate-950">
+                        {produto.nomeCompleto}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-3 text-sm font-semibold text-slate-950">
+                        {produto.quantidade}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-3 text-sm text-slate-700">
+                        {currencyFormatter.format(produto.precoCusto)}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-3 text-sm text-slate-700">
+                        {currencyFormatter.format(produto.precoVenda)}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-3 text-sm font-semibold text-emerald-700">
+                        {formatPercent(produto.margemBruta)}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-3 text-sm text-slate-700">
+                        {formatarPrevisao(previsoesPorProdutoId.get(produto.id))}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
 
-        {topProdutos.length > 0 && (
-          <div className="mt-5 overflow-x-auto">
-            <table className="min-w-full divide-y divide-slate-200">
-              <thead>
-                <tr>
-                  <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Produto
-                  </th>
-                  <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Estoque
-                  </th>
-                  <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Preco de custo
-                  </th>
-                  <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Preco de venda
-                  </th>
-                  <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Margem bruta
-                  </th>
-                  <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Previsao de esgotamento
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {topProdutos.map((produto) => (
-                  <tr className="transition hover:bg-slate-50" key={produto.id}>
-                    <td className="min-w-52 px-3 py-3 text-sm font-semibold text-slate-950">
-                      {produto.nomeCompleto}
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-3 text-sm font-semibold text-slate-950">
-                      {produto.quantidade}
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-3 text-sm text-slate-700">
-                      {currencyFormatter.format(produto.precoCusto)}
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-3 text-sm text-slate-700">
-                      {currencyFormatter.format(produto.precoVenda)}
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-3 text-sm font-semibold text-emerald-700">
-                      {formatPercent(produto.margemBruta)}
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-3 text-sm text-slate-700">
-                      {formatarPrevisao(previsoesPorProdutoId.get(produto.id))}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <aside className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
+          <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Patrimonio / estoque
+            </p>
+            <p className="mt-1 text-sm font-medium text-slate-500">
+              Valor investido parado
+            </p>
+            <p className="mt-2 text-3xl font-semibold text-slate-950">
+              {currencyFormatter.format(valorInvestidoEstoque)}
+            </p>
+            <p className="mt-2 text-xs text-slate-500">
+              {produtos.length} produtos cadastrados
+            </p>
           </div>
-        )}
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-5 shadow-sm">
-          <p className="text-sm font-medium text-emerald-700">
-            Lucro Liquido Real
-          </p>
-          <p className="mt-2 text-3xl font-semibold text-emerald-700">
-            {currencyFormatter.format(
-              estatisticas?.lucro_liquido_periodo ?? 0,
-            )}
-          </p>
-          <p className="mt-1 text-xs text-emerald-700">
-            Saidas do periodo atual
-          </p>
-        </div>
-        <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm font-medium text-slate-500">Produtos</p>
-          <p className="mt-2 text-3xl font-semibold text-slate-950">
-            {produtos.length}
-          </p>
-        </div>
-        <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm font-medium text-slate-500">Itens em estoque</p>
-          <p className="mt-2 text-3xl font-semibold text-cyan-700">
-            {totalItens}
-          </p>
-        </div>
-        <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm font-medium text-slate-500">Atencao</p>
-          <p className="mt-2 text-3xl font-semibold text-amber-600">
-            {produtosBaixos}
-          </p>
-        </div>
-      </div>
-    </section>
+          <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-sm font-medium text-slate-500">
+              Itens em estoque
+            </p>
+            <p className="mt-2 text-3xl font-semibold text-cyan-700">
+              {totalItens}
+            </p>
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-sm font-medium text-slate-500">Atencao</p>
+            <p className="mt-2 text-3xl font-semibold text-amber-600">
+              {produtosBaixos}
+            </p>
+          </div>
+        </aside>
+      </section>
+    </div>
   );
 }
 
@@ -1450,6 +1548,9 @@ function HistoricoMovimentacoes({ movimentacoes }) {
                   Tipo
                 </th>
                 <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Status
+                </th>
+                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Quantidade
                 </th>
                 <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -1484,6 +1585,15 @@ function HistoricoMovimentacoes({ movimentacoes }) {
                       }`}
                     >
                       {movimentacao.tipo === "entrada" ? "Entrada" : "Saida"}
+                    </span>
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-3">
+                    <span
+                      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${getVendaStatusClasses(
+                        movimentacao.status,
+                      )}`}
+                    >
+                      {getVendaStatusLabel(movimentacao.status)}
                     </span>
                   </td>
                   <td className="whitespace-nowrap px-3 py-3 text-sm font-semibold text-slate-950">

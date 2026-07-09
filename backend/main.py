@@ -201,6 +201,7 @@ def init_db() -> None:
                     produto_id INT NOT NULL,
                     usuario_id INT NULL,
                     tipo ENUM('entrada', 'saida') NOT NULL,
+                    status VARCHAR(20) NOT NULL DEFAULT 'concluido',
                     quantidade INT NOT NULL,
                     valor_bruto_total DECIMAL(12, 2) NOT NULL DEFAULT 0,
                     valor_custo_total DECIMAL(12, 2) NOT NULL DEFAULT 0,
@@ -235,6 +236,29 @@ def init_db() -> None:
                     "ALTER TABLE movimentacao "
                     "MODIFY valor_total DOUBLE NOT NULL DEFAULT 0"
                 )
+
+            if "status" not in movimentacao_columns:
+                cursor.execute(
+                    "ALTER TABLE movimentacao "
+                    "ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'concluido' "
+                    "AFTER tipo"
+                )
+            else:
+                cursor.execute(
+                    """
+                    UPDATE movimentacao
+                    SET status = 'concluido'
+                    WHERE status IS NULL OR status = ''
+                    """
+                )
+
+            cursor.execute(
+                """
+                UPDATE movimentacao
+                SET status = 'concluido'
+                WHERE status NOT IN ('orcamento', 'pendente', 'concluido')
+                """
+            )
 
             for column_name in (
                 "valor_bruto_total",
@@ -369,6 +393,7 @@ class MovimentacaoIn(BaseModel):
     produto_id: int
     tipo: Literal["entrada", "saida"]
     quantidade: int = Field(..., gt=0)
+    status: Literal["orcamento", "pendente", "concluido"] = "concluido"
 
 
 class MovimentacaoOut(BaseModel):
@@ -376,6 +401,7 @@ class MovimentacaoOut(BaseModel):
     produto_id: int
     tipo: str
     quantidade: int
+    status: str
     valor_bruto_total: float
     valor_custo_total: float
     valor_impostos_total: float
@@ -412,6 +438,12 @@ class DashboardStatsOut(BaseModel):
     valor_bruto_periodo: float
     valor_impostos_periodo: float
     lucro_liquido_periodo: float
+    total_vendas: float
+    qtd_vendas: int
+    total_liquido: float
+    total_orcamentos: float
+    qtd_orcamentos: int
+    pedidos_sem_confirmacao: int
 
 
 class MovimentacaoTextoIn(BaseModel):
@@ -550,9 +582,14 @@ def executar_movimentacao(mov: MovimentacaoIn, usuario: UsuarioOut) -> dict:
             if produto is None:
                 raise HTTPException(status_code=404, detail="Produto nao encontrado.")
 
+            deve_alterar_estoque = mov.tipo == "entrada" or mov.status in (
+                "pendente",
+                "concluido",
+            )
+
             if mov.tipo == "entrada":
                 nova_qtd = produto["quantidade_atual"] + mov.quantidade
-            else:
+            elif deve_alterar_estoque:
                 nova_qtd = produto["quantidade_atual"] - mov.quantidade
                 if nova_qtd < 0:
                     raise HTTPException(
@@ -563,6 +600,8 @@ def executar_movimentacao(mov: MovimentacaoIn, usuario: UsuarioOut) -> dict:
                             f"solicitado: {mov.quantidade}."
                         ),
                     )
+            else:
+                nova_qtd = produto["quantidade_atual"]
 
             valor_bruto_total = 0.0
             valor_custo_total = 0.0
@@ -590,28 +629,31 @@ def executar_movimentacao(mov: MovimentacaoIn, usuario: UsuarioOut) -> dict:
                     2,
                 )
 
-            cursor.execute(
-                "UPDATE produto SET quantidade_atual = %s WHERE id = %s",
-                (nova_qtd, mov.produto_id),
-            )
+            if deve_alterar_estoque:
+                cursor.execute(
+                    "UPDATE produto SET quantidade_atual = %s WHERE id = %s",
+                    (nova_qtd, mov.produto_id),
+                )
             cursor.execute(
                 """
                 INSERT INTO movimentacao (
                     produto_id,
                     usuario_id,
                     tipo,
+                    status,
                     quantidade,
                     valor_bruto_total,
                     valor_custo_total,
                     valor_impostos_total,
                     lucro_liquido
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     mov.produto_id,
                     usuario.id,
                     mov.tipo,
+                    mov.status,
                     mov.quantidade,
                     valor_bruto_total,
                     valor_custo_total,
@@ -626,6 +668,7 @@ def executar_movimentacao(mov: MovimentacaoIn, usuario: UsuarioOut) -> dict:
                     produto_id,
                     usuario_id,
                     tipo,
+                    status,
                     quantidade,
                     valor_bruto_total,
                     valor_custo_total,
@@ -980,6 +1023,7 @@ def listar_movimentacoes(_usuario: UsuarioOut = Depends(require_admin)):
                     m.produto_id,
                     COALESCE(p.nome, 'Produto removido') AS produto_nome,
                     m.tipo,
+                    m.status,
                     m.quantidade,
                     m.valor_bruto_total,
                     m.valor_custo_total,
@@ -1033,9 +1077,40 @@ def obter_estatisticas_dashboard(
             cursor.execute(
                 """
                 SELECT
-                    COALESCE(SUM(valor_bruto_total), 0) AS valor_bruto_periodo,
-                    COALESCE(SUM(valor_impostos_total), 0) AS valor_impostos_periodo,
-                    COALESCE(SUM(lucro_liquido), 0) AS lucro_liquido_periodo
+                    COALESCE(SUM(
+                        CASE
+                            WHEN tipo = 'saida' AND status = 'concluido'
+                            THEN valor_bruto_total
+                            ELSE 0
+                        END
+                    ), 0) AS total_vendas,
+                    COALESCE(SUM(
+                        CASE
+                            WHEN tipo = 'saida' AND status = 'concluido'
+                            THEN lucro_liquido
+                            ELSE 0
+                        END
+                    ), 0) AS total_liquido,
+                    COALESCE(SUM(
+                        CASE
+                            WHEN tipo = 'saida' AND status = 'concluido'
+                            THEN valor_impostos_total
+                            ELSE 0
+                        END
+                    ), 0) AS valor_impostos_periodo,
+                    COALESCE(SUM(
+                        CASE
+                            WHEN tipo = 'saida' AND status = 'orcamento'
+                            THEN valor_bruto_total
+                            ELSE 0
+                        END
+                    ), 0) AS total_orcamentos,
+                    SUM(CASE WHEN tipo = 'saida' AND status = 'concluido' THEN 1 ELSE 0 END)
+                        AS qtd_vendas,
+                    SUM(CASE WHEN tipo = 'saida' AND status = 'orcamento' THEN 1 ELSE 0 END)
+                        AS qtd_orcamentos,
+                    SUM(CASE WHEN tipo = 'saida' AND status = 'pendente' THEN 1 ELSE 0 END)
+                        AS pedidos_sem_confirmacao
                 FROM movimentacao
                 WHERE tipo = 'saida'
                     AND criado_em >= %s
@@ -1048,9 +1123,15 @@ def obter_estatisticas_dashboard(
     return {
         "periodo_inicio": periodo_inicio.isoformat(timespec="seconds"),
         "periodo_fim": periodo_fim.isoformat(timespec="seconds"),
-        "valor_bruto_periodo": float(row["valor_bruto_periodo"] or 0),
+        "valor_bruto_periodo": float(row["total_vendas"] or 0),
         "valor_impostos_periodo": float(row["valor_impostos_periodo"] or 0),
-        "lucro_liquido_periodo": float(row["lucro_liquido_periodo"] or 0),
+        "lucro_liquido_periodo": float(row["total_liquido"] or 0),
+        "total_vendas": float(row["total_vendas"] or 0),
+        "qtd_vendas": int(row["qtd_vendas"] or 0),
+        "total_liquido": float(row["total_liquido"] or 0),
+        "total_orcamentos": float(row["total_orcamentos"] or 0),
+        "qtd_orcamentos": int(row["qtd_orcamentos"] or 0),
+        "pedidos_sem_confirmacao": int(row["pedidos_sem_confirmacao"] or 0),
     }
 
 
@@ -1095,6 +1176,7 @@ def listar_previsao_ruptura(_usuario: UsuarioOut = Depends(get_current_user)):
                     COALESCE(SUM(
                         CASE
                             WHEN m.tipo = 'saida'
+                                AND m.status IN ('pendente', 'concluido')
                                 AND m.criado_em >= DATE_SUB(NOW(), INTERVAL 7 DAY)
                             THEN m.quantidade
                             ELSE 0
