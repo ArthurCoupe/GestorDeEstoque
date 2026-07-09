@@ -29,6 +29,7 @@ import {
   listarPrevisaoRuptura,
   listarProdutos,
   loginUsuario,
+  obterEstatisticasDashboard,
   registrarMovimentacao,
   registrarMovimentacaoTexto,
   setAuthToken,
@@ -39,6 +40,25 @@ const currencyFormatter = new Intl.NumberFormat("pt-BR", {
   style: "currency",
   currency: "BRL",
 });
+
+function asNumber(value) {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function calcularMargemBruta(produto) {
+  const precoVenda = asNumber(produto.preco_venda);
+
+  if (precoVenda <= 0) {
+    return 0;
+  }
+
+  return ((precoVenda - asNumber(produto.preco_custo)) / precoVenda) * 100;
+}
+
+function formatPercent(value) {
+  return `${asNumber(value).toFixed(2)}%`;
+}
 
 function decodeAuthToken(token) {
   if (!token) return null;
@@ -251,29 +271,415 @@ function useDialogFocusTrap(onClose) {
   return dialogRef;
 }
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function getReportRisk(produto) {
+  const estoqueMinimo = produto.estoque_minimo ?? 5;
+
+  if (produto.quantidade_atual === 0) {
+    return {
+      label: "Critico",
+      className: "status-critical",
+      note: "Produto esgotado. Reposicao imediata recomendada.",
+    };
+  }
+
+  if (produto.quantidade_atual < estoqueMinimo) {
+    return {
+      label: "Abaixo do minimo",
+      className: "status-low",
+      note: "Estoque abaixo do limite operacional.",
+    };
+  }
+
+  if (produto.quantidade_atual === estoqueMinimo) {
+    return {
+      label: "No limite",
+      className: "status-watch",
+      note: "Produto exatamente no estoque minimo.",
+    };
+  }
+
+  return {
+    label: "Saudavel",
+    className: "status-ok",
+    note: "Estoque acima do minimo configurado.",
+  };
+}
+
+function formatExcelNumber(value) {
+  return Number(value || 0).toFixed(2);
+}
+
 function csvEscape(value) {
   const text = String(value ?? "");
   return `"${text.replaceAll('"', '""')}"`;
 }
 
-function exportarProdutosCsv(produtos) {
-  const headers = ["ID", "Produto", "Preco", "Estoque", "Status"];
-  const rows = produtos.map((produto) => [
-    produto.id,
-    produto.nome,
-    produto.preco,
-    produto.quantidade_atual,
-    getStatus(produto).label,
-  ]);
-  const csv = [headers, ...rows]
-    .map((row) => row.map(csvEscape).join(","))
-    .join("\n");
+function buildProdutosExcelHtml(produtos) {
+  const dataGeracao = new Intl.DateTimeFormat("pt-BR", {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(new Date());
+  const totalProdutos = produtos.length;
+  const totalItens = produtos.reduce(
+    (total, produto) => total + produto.quantidade_atual,
+    0,
+  );
+  const valorTotalCusto = produtos.reduce(
+    (total, produto) =>
+      total + asNumber(produto.preco_custo) * produto.quantidade_atual,
+    0,
+  );
+  const valorTotalVenda = produtos.reduce(
+    (total, produto) =>
+      total + asNumber(produto.preco_venda) * produto.quantidade_atual,
+    0,
+  );
+  const margemMedia =
+    valorTotalVenda > 0
+      ? ((valorTotalVenda - valorTotalCusto) / valorTotalVenda) * 100
+      : 0;
+  const produtosEsgotados = produtos.filter(
+    (produto) => produto.quantidade_atual === 0,
+  ).length;
+  const produtosAbaixoMinimo = produtos.filter(
+    (produto) =>
+      produto.quantidade_atual > 0 &&
+      produto.quantidade_atual < (produto.estoque_minimo ?? 5),
+  ).length;
+  const produtosNoLimite = produtos.filter(
+    (produto) => produto.quantidade_atual === (produto.estoque_minimo ?? 5),
+  ).length;
+  const reposicaoSugerida = produtos.reduce((total, produto) => {
+    const estoqueMinimo = produto.estoque_minimo ?? 5;
+    return total + Math.max(estoqueMinimo - produto.quantidade_atual, 0);
+  }, 0);
+  const sortedProdutos = [...produtos].sort((a, b) => {
+    const statusA = a.quantidade_atual - (a.estoque_minimo ?? 5);
+    const statusB = b.quantidade_atual - (b.estoque_minimo ?? 5);
 
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    if (statusA !== statusB) return statusA - statusB;
+    return a.nome.localeCompare(b.nome);
+  });
+
+  const rows = sortedProdutos
+    .map((produto) => {
+      const estoqueMinimo = produto.estoque_minimo ?? 5;
+      const diferencaMinimo = produto.quantidade_atual - estoqueMinimo;
+      const quantidadeRepor = Math.max(estoqueMinimo - produto.quantidade_atual, 0);
+      const precoCusto = asNumber(produto.preco_custo);
+      const precoVenda = asNumber(produto.preco_venda);
+      const margemBruta = calcularMargemBruta(produto);
+      const valorEstoqueCusto = precoCusto * produto.quantidade_atual;
+      const valorVendaPotencial = precoVenda * produto.quantidade_atual;
+      const risco = getReportRisk(produto);
+
+      return `
+        <tr>
+          <td class="text">#${escapeHtml(produto.id)}</td>
+          <td class="text product">${escapeHtml(produto.nome)}</td>
+          <td class="money">${formatExcelNumber(precoCusto)}</td>
+          <td class="money">${formatExcelNumber(precoVenda)}</td>
+          <td class="percent">${formatExcelNumber(margemBruta / 100)}</td>
+          <td class="percent">${formatExcelNumber(asNumber(produto.imposto_percentual) / 100)}</td>
+          <td class="percent">${formatExcelNumber(asNumber(produto.taxa_operacional_percentual) / 100)}</td>
+          <td class="number">${produto.quantidade_atual}</td>
+          <td class="number">${estoqueMinimo}</td>
+          <td class="number">${diferencaMinimo}</td>
+          <td class="number">${quantidadeRepor}</td>
+          <td class="money">${formatExcelNumber(valorEstoqueCusto)}</td>
+          <td class="money">${formatExcelNumber(valorVendaPotencial)}</td>
+          <td class="${risco.className}">${escapeHtml(risco.label)}</td>
+          <td class="text">${escapeHtml(risco.note)}</td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  return `
+    <html xmlns:o="urn:schemas-microsoft-com:office:office"
+      xmlns:x="urn:schemas-microsoft-com:office:excel"
+      xmlns="http://www.w3.org/TR/REC-html40">
+      <head>
+        <meta charset="UTF-8" />
+        <!--[if gte mso 9]>
+        <xml>
+          <x:ExcelWorkbook>
+            <x:ExcelWorksheets>
+              <x:ExcelWorksheet>
+                <x:Name>Relatorio Estoque</x:Name>
+                <x:WorksheetOptions>
+                  <x:DisplayGridlines/>
+                  <x:FreezePanes/>
+                  <x:FrozenNoSplit/>
+                  <x:SplitHorizontal>11</x:SplitHorizontal>
+                  <x:TopRowBottomPane>11</x:TopRowBottomPane>
+                </x:WorksheetOptions>
+              </x:ExcelWorksheet>
+            </x:ExcelWorksheets>
+          </x:ExcelWorkbook>
+        </xml>
+        <![endif]-->
+        <style>
+          body {
+            font-family: Arial, sans-serif;
+            color: #0f172a;
+          }
+          table {
+            border-collapse: collapse;
+          }
+          .title {
+            background: #0f172a;
+            color: #ffffff;
+            font-size: 22px;
+            font-weight: 700;
+            height: 34px;
+          }
+          .subtitle {
+            background: #e0f2fe;
+            color: #075985;
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+          }
+          .section {
+            background: #164e63;
+            color: #ffffff;
+            font-weight: 700;
+          }
+          .metric-label {
+            background: #f8fafc;
+            border: 1px solid #cbd5e1;
+            color: #475569;
+            font-weight: 700;
+          }
+          .metric-value {
+            background: #ffffff;
+            border: 1px solid #cbd5e1;
+            color: #0f172a;
+            font-size: 16px;
+            font-weight: 700;
+          }
+          th {
+            background: #0e7490;
+            border: 1px solid #0f5f75;
+            color: #ffffff;
+            font-weight: 700;
+            height: 26px;
+          }
+          td {
+            border: 1px solid #dbe4ee;
+            height: 24px;
+            padding: 4px;
+          }
+          .text {
+            mso-number-format: "\\@";
+          }
+          .product {
+            font-weight: 700;
+          }
+          .number {
+            mso-number-format: "#,##0";
+            text-align: right;
+          }
+          .money {
+            mso-number-format: "\\0022R$\\0022 #,##0.00";
+            text-align: right;
+          }
+          .percent {
+            mso-number-format: "0.00%";
+            text-align: right;
+          }
+          .status-ok {
+            background: #dcfce7;
+            color: #166534;
+            font-weight: 700;
+          }
+          .status-watch {
+            background: #fef9c3;
+            color: #854d0e;
+            font-weight: 700;
+          }
+          .status-low {
+            background: #ffedd5;
+            color: #9a3412;
+            font-weight: 700;
+          }
+          .status-critical {
+            background: #fee2e2;
+            color: #991b1b;
+            font-weight: 700;
+          }
+          .muted {
+            color: #64748b;
+            font-size: 12px;
+          }
+        </style>
+      </head>
+      <body>
+        <table>
+          <colgroup>
+            <col style="width: 70px" />
+            <col style="width: 260px" />
+            <col style="width: 120px" />
+            <col style="width: 120px" />
+            <col style="width: 120px" />
+            <col style="width: 110px" />
+            <col style="width: 120px" />
+            <col style="width: 110px" />
+            <col style="width: 110px" />
+            <col style="width: 120px" />
+            <col style="width: 130px" />
+            <col style="width: 140px" />
+            <col style="width: 160px" />
+            <col style="width: 150px" />
+            <col style="width: 360px" />
+          </colgroup>
+          <tr>
+            <td class="title" colspan="15">GestorDeEstoque - Relatorio Executivo de Inventario</td>
+          </tr>
+          <tr>
+            <td class="subtitle" colspan="15">Gerado em ${escapeHtml(dataGeracao)}</td>
+          </tr>
+          <tr><td colspan="15"></td></tr>
+          <tr>
+            <td class="section" colspan="15">Resumo operacional</td>
+          </tr>
+          <tr>
+            <td class="metric-label" colspan="2">Produtos cadastrados</td>
+            <td class="metric-value number">${totalProdutos}</td>
+            <td class="metric-label" colspan="2">Itens em estoque</td>
+            <td class="metric-value number">${totalItens}</td>
+            <td class="metric-label" colspan="2">Estoque a custo</td>
+            <td class="metric-value money" colspan="2">${formatExcelNumber(valorTotalCusto)}</td>
+            <td class="metric-label" colspan="2">Venda potencial</td>
+            <td class="metric-value money" colspan="3">${formatExcelNumber(valorTotalVenda)}</td>
+          </tr>
+          <tr>
+            <td class="metric-label" colspan="2">Esgotados</td>
+            <td class="metric-value number">${produtosEsgotados}</td>
+            <td class="metric-label" colspan="2">Abaixo do minimo</td>
+            <td class="metric-value number">${produtosAbaixoMinimo}</td>
+            <td class="metric-label" colspan="2">No limite</td>
+            <td class="metric-value number">${produtosNoLimite}</td>
+            <td class="metric-label" colspan="2">Margem media bruta</td>
+            <td class="metric-value percent" colspan="4">${formatExcelNumber(margemMedia / 100)}</td>
+          </tr>
+          <tr>
+            <td class="metric-label" colspan="2">Reposicao sugerida</td>
+            <td class="metric-value number">${reposicaoSugerida}</td>
+            <td class="muted" colspan="12">Produtos ordenados por maior urgencia operacional.</td>
+          </tr>
+          <tr><td colspan="15"></td></tr>
+          <tr>
+            <td class="section" colspan="15">Detalhamento do estoque atual</td>
+          </tr>
+          <tr>
+            <th>ID</th>
+            <th>Produto</th>
+            <th>Preco de custo</th>
+            <th>Preco de venda</th>
+            <th>Margem bruta</th>
+            <th>% Imposto</th>
+            <th>% Taxa</th>
+            <th>Estoque atual</th>
+            <th>Estoque minimo</th>
+            <th>Saldo vs minimo</th>
+            <th>Qtd. a repor</th>
+            <th>Valor estoque custo</th>
+            <th>Venda potencial</th>
+            <th>Risco</th>
+            <th>Observacao</th>
+          </tr>
+          ${rows}
+        </table>
+      </body>
+    </html>
+  `;
+}
+
+function exportarProdutosExcel(produtos) {
+  const html = buildProdutosExcelHtml(produtos);
+  const blob = new Blob(["\ufeff", html], {
+    type: "application/vnd.ms-excel;charset=utf-8",
+  });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `relatorio-estoque-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.download = `relatorio-executivo-estoque-${new Date()
+    .toISOString()
+    .slice(0, 10)}.xls`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function exportarProdutosCsvFinanceiro(produtos) {
+  const headers = [
+    "ID",
+    "Produto",
+    "Preco de Custo",
+    "Preco de Venda",
+    "Margem Bruta %",
+    "Imposto %",
+    "Taxa Operacional %",
+    "Estoque Atual",
+    "Estoque Minimo",
+    "Saldo vs Minimo",
+    "Qtd. a Repor",
+    "Valor Estoque Custo",
+    "Venda Potencial",
+    "Status",
+    "Observacao",
+  ];
+
+  const rows = produtos.map((produto) => {
+    const estoqueMinimo = produto.estoque_minimo ?? 5;
+    const precoCusto = asNumber(produto.preco_custo);
+    const precoVenda = asNumber(produto.preco_venda);
+    const risco = getReportRisk(produto);
+
+    return [
+      produto.id,
+      produto.nome,
+      formatExcelNumber(precoCusto),
+      formatExcelNumber(precoVenda),
+      formatExcelNumber(calcularMargemBruta(produto)),
+      formatExcelNumber(produto.imposto_percentual),
+      formatExcelNumber(produto.taxa_operacional_percentual),
+      produto.quantidade_atual,
+      estoqueMinimo,
+      produto.quantidade_atual - estoqueMinimo,
+      Math.max(estoqueMinimo - produto.quantidade_atual, 0),
+      formatExcelNumber(precoCusto * produto.quantidade_atual),
+      formatExcelNumber(precoVenda * produto.quantidade_atual),
+      risco.label,
+      risco.note,
+    ];
+  });
+
+  const csv = [headers, ...rows]
+    .map((row) => row.map(csvEscape).join(";"))
+    .join("\r\n");
+  const blob = new Blob(["\ufeff", csv], {
+    type: "text/csv;charset=utf-8",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `relatorio-financeiro-estoque-${new Date()
+    .toISOString()
+    .slice(0, 10)}.csv`;
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -295,9 +701,13 @@ function CardTitle({ eyebrow, title, titleId }) {
 
 function FormProduto({ onSaved }) {
   const [estoqueMinimo, setEstoqueMinimo] = useState("5");
+  const [impostoPercentual, setImpostoPercentual] = useState("0");
   const [nome, setNome] = useState("");
-  const [preco, setPreco] = useState("");
+  const [precoCusto, setPrecoCusto] = useState("");
+  const [precoVenda, setPrecoVenda] = useState("");
   const [qtd, setQtd] = useState("0");
+  const [taxaOperacionalPercentual, setTaxaOperacionalPercentual] =
+    useState("0");
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(event) {
@@ -307,15 +717,23 @@ function FormProduto({ onSaved }) {
     try {
       await cadastrarProduto({
         nome: nome.trim(),
-        preco: parseFloat(preco),
+        preco_custo: parseFloat(precoCusto),
+        preco_venda: parseFloat(precoVenda),
+        imposto_percentual: parseFloat(impostoPercentual || "0"),
+        taxa_operacional_percentual: parseFloat(
+          taxaOperacionalPercentual || "0",
+        ),
         quantidade_atual: parseInt(qtd, 10),
         estoque_minimo: parseInt(estoqueMinimo, 10),
       });
 
       setNome("");
       setEstoqueMinimo("5");
-      setPreco("");
+      setImpostoPercentual("0");
+      setPrecoCusto("");
+      setPrecoVenda("");
       setQtd("0");
+      setTaxaOperacionalPercentual("0");
       toast.success("Produto cadastrado com sucesso.");
       await onSaved();
     } catch (err) {
@@ -345,20 +763,75 @@ function FormProduto({ onSaved }) {
           />
         </label>
 
-        <label className="block" htmlFor="produto-preco">
-          <span className="text-sm font-medium text-slate-700">Preco</span>
-          <input
-            id="produto-preco"
-            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
-            type="number"
-            step="0.01"
-            min="0.01"
-            value={preco}
-            onChange={(event) => setPreco(event.target.value)}
-            required
-            placeholder="0.00"
-          />
-        </label>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="block" htmlFor="produto-preco-custo">
+            <span className="text-sm font-medium text-slate-700">
+              Preco de custo
+            </span>
+            <input
+              id="produto-preco-custo"
+              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
+              type="number"
+              step="0.01"
+              min="0"
+              value={precoCusto}
+              onChange={(event) => setPrecoCusto(event.target.value)}
+              required
+              placeholder="0.00"
+            />
+          </label>
+
+          <label className="block" htmlFor="produto-preco-venda">
+            <span className="text-sm font-medium text-slate-700">
+              Preco de venda
+            </span>
+            <input
+              id="produto-preco-venda"
+              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
+              type="number"
+              step="0.01"
+              min="0.01"
+              value={precoVenda}
+              onChange={(event) => setPrecoVenda(event.target.value)}
+              required
+              placeholder="0.00"
+            />
+          </label>
+
+          <label className="block" htmlFor="produto-imposto">
+            <span className="text-sm font-medium text-slate-700">
+              % Imposto
+            </span>
+            <input
+              id="produto-imposto"
+              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
+              type="number"
+              step="0.01"
+              min="0"
+              value={impostoPercentual}
+              onChange={(event) => setImpostoPercentual(event.target.value)}
+              required
+            />
+          </label>
+
+          <label className="block" htmlFor="produto-taxa-operacional">
+            <span className="text-sm font-medium text-slate-700">
+              % Taxa
+            </span>
+            <input
+              id="produto-taxa-operacional"
+              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
+              type="number"
+              step="0.01"
+              min="0"
+              value={taxaOperacionalPercentual}
+              onChange={(event) =>
+                setTaxaOperacionalPercentual(event.target.value)
+              }
+              required
+            />
+          </label>
+        </div>
 
         <label className="block" htmlFor="produto-quantidade">
           <span className="text-sm font-medium text-slate-700">
@@ -530,7 +1003,7 @@ function FormMovimentacao({ produtos, onSaved }) {
   );
 }
 
-function DashboardEstoque({ previsoes, produtos }) {
+function DashboardEstoque({ estatisticas, previsoes, produtos }) {
   const previsoesPorProdutoId = useMemo(
     () =>
       new Map(
@@ -551,6 +1024,9 @@ function DashboardEstoque({ previsoes, produtos }) {
               ? `${produto.nome.slice(0, 16)}...`
               : produto.nome,
           quantidade: produto.quantidade_atual,
+          precoCusto: asNumber(produto.preco_custo),
+          precoVenda: asNumber(produto.preco_venda),
+          margemBruta: calcularMargemBruta(produto),
         })),
     [produtos],
   );
@@ -560,7 +1036,7 @@ function DashboardEstoque({ previsoes, produtos }) {
     0,
   );
   const produtosBaixos = produtos.filter(
-    (produto) => produto.quantidade_atual <= 5,
+    (produto) => produto.quantidade_atual <= (produto.estoque_minimo ?? 5),
   ).length;
 
   return (
@@ -625,6 +1101,15 @@ function DashboardEstoque({ previsoes, produtos }) {
                     Estoque
                   </th>
                   <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Preco de custo
+                  </th>
+                  <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Preco de venda
+                  </th>
+                  <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Margem bruta
+                  </th>
+                  <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                     Previsao de esgotamento
                   </th>
                 </tr>
@@ -639,6 +1124,15 @@ function DashboardEstoque({ previsoes, produtos }) {
                       {produto.quantidade}
                     </td>
                     <td className="whitespace-nowrap px-3 py-3 text-sm text-slate-700">
+                      {currencyFormatter.format(produto.precoCusto)}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-3 text-sm text-slate-700">
+                      {currencyFormatter.format(produto.precoVenda)}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-3 text-sm font-semibold text-emerald-700">
+                      {formatPercent(produto.margemBruta)}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-3 text-sm text-slate-700">
                       {formatarPrevisao(previsoesPorProdutoId.get(produto.id))}
                     </td>
                   </tr>
@@ -649,7 +1143,20 @@ function DashboardEstoque({ previsoes, produtos }) {
         )}
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-1">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-5 shadow-sm">
+          <p className="text-sm font-medium text-emerald-700">
+            Lucro Liquido Real
+          </p>
+          <p className="mt-2 text-3xl font-semibold text-emerald-700">
+            {currencyFormatter.format(
+              estatisticas?.lucro_liquido_periodo ?? 0,
+            )}
+          </p>
+          <p className="mt-1 text-xs text-emerald-700">
+            Saidas do periodo atual
+          </p>
+        </div>
         <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-sm font-medium text-slate-500">Produtos</p>
           <p className="mt-2 text-3xl font-semibold text-slate-950">
@@ -705,14 +1212,24 @@ function TabelaProdutos({ isAdmin, produtos, onDelete, onEdit }) {
     return produtos.filter((produto) => idsEncontrados.has(produto.id));
   }, [busca, indiceProdutosPorNome, produtos]);
 
-  function handleExport() {
+  function handleExportExcel() {
     if (produtos.length === 0) {
       toast.error("Nao ha produtos para exportar.");
       return;
     }
 
-    exportarProdutosCsv(produtos);
-    toast.success("Relatorio CSV exportado.");
+    exportarProdutosExcel(produtos);
+    toast.success("Relatorio Excel exportado.");
+  }
+
+  function handleExportCsv() {
+    if (produtos.length === 0) {
+      toast.error("Nao ha produtos para exportar.");
+      return;
+    }
+
+    exportarProdutosCsvFinanceiro(produtos);
+    toast.success("CSV financeiro exportado.");
   }
 
   return (
@@ -721,14 +1238,24 @@ function TabelaProdutos({ isAdmin, produtos, onDelete, onEdit }) {
         <CardTitle eyebrow="Inventario" title="Estoque atual" />
 
         <div className="flex w-full flex-col gap-2 sm:flex-row lg:max-w-xl">
-          <button
-            className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-cyan-100 disabled:cursor-not-allowed disabled:opacity-60"
-            type="button"
-            onClick={handleExport}
-            disabled={produtos.length === 0}
-          >
-            Exportar Relatorio (CSV)
-          </button>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <button
+              className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-cyan-100 disabled:cursor-not-allowed disabled:opacity-60"
+              type="button"
+              onClick={handleExportExcel}
+              disabled={produtos.length === 0}
+            >
+              Exportar Excel
+            </button>
+            <button
+              className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-cyan-100 disabled:cursor-not-allowed disabled:opacity-60"
+              type="button"
+              onClick={handleExportCsv}
+              disabled={produtos.length === 0}
+            >
+              Exportar CSV
+            </button>
+          </div>
 
           <label className="w-full">
             <span className="sr-only">Buscar produto</span>
@@ -766,7 +1293,13 @@ function TabelaProdutos({ isAdmin, produtos, onDelete, onEdit }) {
                   Produto
                 </th>
                 <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Preco
+                  Custo
+                </th>
+                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Venda
+                </th>
+                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Margem
                 </th>
                 <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Estoque
@@ -797,7 +1330,13 @@ function TabelaProdutos({ isAdmin, produtos, onDelete, onEdit }) {
                       {produto.nome}
                     </td>
                     <td className="whitespace-nowrap px-3 py-3 text-sm text-slate-700">
-                      {currencyFormatter.format(produto.preco)}
+                      {currencyFormatter.format(produto.preco_custo)}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-3 text-sm text-slate-700">
+                      {currencyFormatter.format(produto.preco_venda)}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-3 text-sm font-semibold text-emerald-700">
+                      {formatPercent(calcularMargemBruta(produto))}
                     </td>
                     <td className="whitespace-nowrap px-3 py-3 text-sm font-semibold text-slate-950">
                       {produto.quantidade_atual}
@@ -841,12 +1380,56 @@ function TabelaProdutos({ isAdmin, produtos, onDelete, onEdit }) {
 }
 
 function HistoricoMovimentacoes({ movimentacoes }) {
+  const totais = useMemo(
+    () =>
+      movimentacoes.reduce(
+        (acc, movimentacao) => ({
+          valorBruto: acc.valorBruto + asNumber(movimentacao.valor_bruto_total),
+          impostos:
+            acc.impostos + asNumber(movimentacao.valor_impostos_total),
+          lucroLiquido:
+            acc.lucroLiquido + asNumber(movimentacao.lucro_liquido),
+        }),
+        { valorBruto: 0, impostos: 0, lucroLiquido: 0 },
+      ),
+    [movimentacoes],
+  );
+
   return (
     <section
       className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm"
       id="historico"
     >
       <CardTitle eyebrow="Auditoria" title="Historico de movimentacoes" />
+
+      {movimentacoes.length > 0 && (
+        <div className="mb-5 grid gap-3 sm:grid-cols-3">
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Valor bruto
+            </p>
+            <p className="mt-1 text-xl font-semibold text-slate-950">
+              {currencyFormatter.format(totais.valorBruto)}
+            </p>
+          </div>
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
+              Impostos e taxas
+            </p>
+            <p className="mt-1 text-xl font-semibold text-amber-700">
+              {currencyFormatter.format(totais.impostos)}
+            </p>
+          </div>
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
+              Lucro liquido
+            </p>
+            <p className="mt-1 text-xl font-semibold text-emerald-700">
+              {currencyFormatter.format(totais.lucroLiquido)}
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="overflow-x-auto">
         {movimentacoes.length === 0 ? (
@@ -868,6 +1451,15 @@ function HistoricoMovimentacoes({ movimentacoes }) {
                 </th>
                 <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Quantidade
+                </th>
+                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Bruto
+                </th>
+                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Impostos
+                </th>
+                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Lucro liquido
                 </th>
               </tr>
             </thead>
@@ -897,6 +1489,19 @@ function HistoricoMovimentacoes({ movimentacoes }) {
                   <td className="whitespace-nowrap px-3 py-3 text-sm font-semibold text-slate-950">
                     {movimentacao.quantidade}
                   </td>
+                  <td className="whitespace-nowrap px-3 py-3 text-sm text-slate-700">
+                    {currencyFormatter.format(
+                      movimentacao.valor_bruto_total ?? 0,
+                    )}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-3 text-sm text-amber-700">
+                    {currencyFormatter.format(
+                      movimentacao.valor_impostos_total ?? 0,
+                    )}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-3 text-sm font-semibold text-emerald-700">
+                    {currencyFormatter.format(movimentacao.lucro_liquido ?? 0)}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -912,8 +1517,19 @@ function EditarProdutoModal({ onClose, onSaved, produto }) {
   const [estoqueMinimo, setEstoqueMinimo] = useState(
     String(produto.estoque_minimo ?? 5),
   );
+  const [impostoPercentual, setImpostoPercentual] = useState(
+    String(produto.imposto_percentual ?? 0),
+  );
   const [nome, setNome] = useState(produto.nome);
-  const [preco, setPreco] = useState(String(produto.preco));
+  const [precoCusto, setPrecoCusto] = useState(
+    String(produto.preco_custo ?? 0),
+  );
+  const [precoVenda, setPrecoVenda] = useState(
+    String(produto.preco_venda ?? 0),
+  );
+  const [taxaOperacionalPercentual, setTaxaOperacionalPercentual] = useState(
+    String(produto.taxa_operacional_percentual ?? 0),
+  );
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(event) {
@@ -923,7 +1539,12 @@ function EditarProdutoModal({ onClose, onSaved, produto }) {
     try {
       await editarProduto(produto.id, {
         nome: nome.trim(),
-        preco: parseFloat(preco),
+        preco_custo: parseFloat(precoCusto),
+        preco_venda: parseFloat(precoVenda),
+        imposto_percentual: parseFloat(impostoPercentual || "0"),
+        taxa_operacional_percentual: parseFloat(
+          taxaOperacionalPercentual || "0",
+        ),
         estoque_minimo: parseInt(estoqueMinimo, 10),
       });
       toast.success("Produto atualizado com sucesso.");
@@ -941,7 +1562,7 @@ function EditarProdutoModal({ onClose, onSaved, produto }) {
       <form
         aria-labelledby="editar-produto-title"
         aria-modal="true"
-        className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-xl"
+        className="w-full max-w-2xl rounded-lg border border-slate-200 bg-white p-6 shadow-xl"
         onSubmit={handleSubmit}
         ref={dialogRef}
         role="dialog"
@@ -965,19 +1586,73 @@ function EditarProdutoModal({ onClose, onSaved, produto }) {
             />
           </label>
 
-          <label className="block" htmlFor="editar-produto-preco">
-            <span className="text-sm font-medium text-slate-700">Preco</span>
-            <input
-              id="editar-produto-preco"
-              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
-              type="number"
-              step="0.01"
-              min="0.01"
-              value={preco}
-              onChange={(event) => setPreco(event.target.value)}
-              required
-            />
-          </label>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="block" htmlFor="editar-produto-preco-custo">
+              <span className="text-sm font-medium text-slate-700">
+                Preco de custo
+              </span>
+              <input
+                id="editar-produto-preco-custo"
+                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
+                type="number"
+                step="0.01"
+                min="0"
+                value={precoCusto}
+                onChange={(event) => setPrecoCusto(event.target.value)}
+                required
+              />
+            </label>
+
+            <label className="block" htmlFor="editar-produto-preco-venda">
+              <span className="text-sm font-medium text-slate-700">
+                Preco de venda
+              </span>
+              <input
+                id="editar-produto-preco-venda"
+                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
+                type="number"
+                step="0.01"
+                min="0.01"
+                value={precoVenda}
+                onChange={(event) => setPrecoVenda(event.target.value)}
+                required
+              />
+            </label>
+
+            <label className="block" htmlFor="editar-produto-imposto">
+              <span className="text-sm font-medium text-slate-700">
+                % Imposto
+              </span>
+              <input
+                id="editar-produto-imposto"
+                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
+                type="number"
+                step="0.01"
+                min="0"
+                value={impostoPercentual}
+                onChange={(event) => setImpostoPercentual(event.target.value)}
+                required
+              />
+            </label>
+
+            <label className="block" htmlFor="editar-produto-taxa-operacional">
+              <span className="text-sm font-medium text-slate-700">
+                % Taxa
+              </span>
+              <input
+                id="editar-produto-taxa-operacional"
+                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
+                type="number"
+                step="0.01"
+                min="0"
+                value={taxaOperacionalPercentual}
+                onChange={(event) =>
+                  setTaxaOperacionalPercentual(event.target.value)
+                }
+                required
+              />
+            </label>
+          </div>
 
           <label className="block" htmlFor="editar-produto-estoque-minimo">
             <span className="text-sm font-medium text-slate-700">
@@ -1410,8 +2085,14 @@ function PageLayout({ children, erroGlobal, isLoadingDados }) {
   );
 }
 
-function DashboardPage({ previsoes, produtos }) {
-  return <DashboardEstoque previsoes={previsoes} produtos={produtos} />;
+function DashboardPage({ estatisticas, previsoes, produtos }) {
+  return (
+    <DashboardEstoque
+      estatisticas={estatisticas}
+      previsoes={previsoes}
+      produtos={produtos}
+    />
+  );
 }
 
 function ProdutosPage({ isAdmin, onDelete, onEdit, onSaved, produtos }) {
@@ -1446,6 +2127,7 @@ function HistoricoPage({ movimentacoes }) {
 
 function AppRoutes({
   erroGlobal,
+  estatisticasDashboard,
   isAdmin,
   isLoadingDados,
   movimentacoes,
@@ -1460,7 +2142,13 @@ function AppRoutes({
       <Routes>
         <Route
           path="/"
-          element={<DashboardPage previsoes={previsoes} produtos={produtos} />}
+          element={
+            <DashboardPage
+              estatisticas={estatisticasDashboard}
+              previsoes={previsoes}
+              produtos={produtos}
+            />
+          }
         />
         <Route
           path="/produtos"
@@ -1499,6 +2187,7 @@ export default function App() {
   const [alertas, setAlertas] = useState([]);
   const [assistenteAberto, setAssistenteAberto] = useState(false);
   const [erroGlobal, setErroGlobal] = useState("");
+  const [estatisticasDashboard, setEstatisticasDashboard] = useState(null);
   const [isLoadingDados, setIsLoadingDados] = useState(false);
   const [movimentacoes, setMovimentacoes] = useState([]);
   const [previsoes, setPrevisoes] = useState([]);
@@ -1514,6 +2203,7 @@ export default function App() {
     setAlertas([]);
     setProdutos([]);
     setPrevisoes([]);
+    setEstatisticasDashboard(null);
     setMovimentacoes([]);
     setErroGlobal("");
     toast.success("Sessao encerrada.");
@@ -1530,18 +2220,25 @@ export default function App() {
         listarProdutos(),
         listarAlertas(),
         listarPrevisaoRuptura(),
+        obterEstatisticasDashboard(),
       ];
 
       if (isAdmin) {
         requests.push(listarMovimentacoes());
       }
 
-      const [produtosData, alertasData, previsoesData, movimentacoesData] =
-        await Promise.all(requests);
+      const [
+        produtosData,
+        alertasData,
+        previsoesData,
+        estatisticasData,
+        movimentacoesData,
+      ] = await Promise.all(requests);
 
       setProdutos(produtosData);
       setAlertas(alertasData);
       setPrevisoes(previsoesData);
+      setEstatisticasDashboard(estatisticasData);
       setMovimentacoes(isAdmin ? movimentacoesData : []);
       setErroGlobal("");
     } catch (err) {
@@ -1592,6 +2289,7 @@ export default function App() {
 
         <AppRoutes
           erroGlobal={erroGlobal}
+          estatisticasDashboard={estatisticasDashboard}
           isAdmin={isAdmin}
           isLoadingDados={isLoadingDados}
           movimentacoes={movimentacoes}

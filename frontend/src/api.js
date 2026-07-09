@@ -99,6 +99,10 @@ export async function listarPrevisaoRuptura() {
   return apiRequest("/ia/previsao-ruptura");
 }
 
+export async function obterEstatisticasDashboard() {
+  return apiRequest("/dashboard/estatisticas");
+}
+
 export async function registrarMovimentacaoTexto(payload) {
   return apiRequest("/ia/movimentacao-texto", {
     method: "POST",
