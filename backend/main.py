@@ -132,7 +132,10 @@ def init_db() -> None:
                 CREATE TABLE IF NOT EXISTS produto (
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     nome VARCHAR(255) NOT NULL,
-                    preco DECIMAL(10, 2) NOT NULL,
+                    preco_custo DECIMAL(10, 2) NOT NULL DEFAULT 0,
+                    preco_venda DECIMAL(10, 2) NOT NULL DEFAULT 0,
+                    imposto_percentual DECIMAL(5, 2) NOT NULL DEFAULT 0,
+                    taxa_operacional_percentual DECIMAL(5, 2) NOT NULL DEFAULT 0,
                     quantidade_atual INT NOT NULL DEFAULT 0,
                     estoque_minimo INT NOT NULL DEFAULT 5
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
@@ -141,25 +144,48 @@ def init_db() -> None:
             cursor.execute("SHOW COLUMNS FROM produto")
             produto_columns = {column["Field"] for column in cursor.fetchall()}
 
-            if "preco" not in produto_columns:
+            if "preco_custo" not in produto_columns:
                 cursor.execute(
                     "ALTER TABLE produto "
-                    "ADD COLUMN preco DECIMAL(10, 2) NOT NULL DEFAULT 0"
+                    "ADD COLUMN preco_custo DECIMAL(10, 2) NOT NULL DEFAULT 0"
                 )
 
-                if "preco_venda" in produto_columns:
-                    cursor.execute("UPDATE produto SET preco = preco_venda")
-
-            if "preco_custo" in produto_columns:
+            if "preco_venda" not in produto_columns:
                 cursor.execute(
                     "ALTER TABLE produto "
-                    "MODIFY preco_custo DOUBLE NOT NULL DEFAULT 0"
+                    "ADD COLUMN preco_venda DECIMAL(10, 2) NOT NULL DEFAULT 0"
                 )
 
-            if "preco_venda" in produto_columns:
+            if "preco" in produto_columns:
+                cursor.execute(
+                    """
+                    UPDATE produto
+                    SET
+                        preco_custo = COALESCE(NULLIF(preco_custo, 0), preco),
+                        preco_venda = COALESCE(NULLIF(preco_venda, 0), preco)
+                    """
+                )
+                cursor.execute("ALTER TABLE produto DROP COLUMN preco")
+
+            cursor.execute(
+                "ALTER TABLE produto "
+                "MODIFY preco_custo DECIMAL(10, 2) NOT NULL DEFAULT 0"
+            )
+            cursor.execute(
+                "ALTER TABLE produto "
+                "MODIFY preco_venda DECIMAL(10, 2) NOT NULL DEFAULT 0"
+            )
+
+            if "imposto_percentual" not in produto_columns:
                 cursor.execute(
                     "ALTER TABLE produto "
-                    "MODIFY preco_venda DOUBLE NOT NULL DEFAULT 0"
+                    "ADD COLUMN imposto_percentual DECIMAL(5, 2) NOT NULL DEFAULT 0"
+                )
+
+            if "taxa_operacional_percentual" not in produto_columns:
+                cursor.execute(
+                    "ALTER TABLE produto "
+                    "ADD COLUMN taxa_operacional_percentual DECIMAL(5, 2) NOT NULL DEFAULT 0"
                 )
 
             if "estoque_minimo" not in produto_columns:
@@ -176,6 +202,10 @@ def init_db() -> None:
                     usuario_id INT NULL,
                     tipo ENUM('entrada', 'saida') NOT NULL,
                     quantidade INT NOT NULL,
+                    valor_bruto_total DECIMAL(12, 2) NOT NULL DEFAULT 0,
+                    valor_custo_total DECIMAL(12, 2) NOT NULL DEFAULT 0,
+                    valor_impostos_total DECIMAL(12, 2) NOT NULL DEFAULT 0,
+                    lucro_liquido DECIMAL(12, 2) NOT NULL DEFAULT 0,
                     criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     CONSTRAINT fk_movimentacao_produto
                         FOREIGN KEY (produto_id) REFERENCES produto(id)
@@ -204,6 +234,28 @@ def init_db() -> None:
                 cursor.execute(
                     "ALTER TABLE movimentacao "
                     "MODIFY valor_total DOUBLE NOT NULL DEFAULT 0"
+                )
+
+            for column_name in (
+                "valor_bruto_total",
+                "valor_custo_total",
+                "valor_impostos_total",
+                "lucro_liquido",
+            ):
+                if column_name not in movimentacao_columns:
+                    cursor.execute(
+                        "ALTER TABLE movimentacao "
+                        f"ADD COLUMN {column_name} DECIMAL(12, 2) "
+                        "NOT NULL DEFAULT 0"
+                    )
+
+            if "valor_total" in movimentacao_columns:
+                cursor.execute(
+                    """
+                    UPDATE movimentacao
+                    SET valor_bruto_total = valor_total
+                    WHERE valor_bruto_total = 0 AND valor_total <> 0
+                    """
                 )
 
             if "usuario_id" not in movimentacao_columns:
@@ -285,21 +337,30 @@ class UsuarioOut(BaseModel):
 
 class ProdutoIn(BaseModel):
     nome: str = Field(..., min_length=1)
-    preco: float = Field(..., gt=0)
+    preco_custo: float = Field(..., ge=0)
+    preco_venda: float = Field(..., gt=0)
+    imposto_percentual: float = Field(0, ge=0)
+    taxa_operacional_percentual: float = Field(0, ge=0)
     quantidade_atual: int = Field(0, ge=0)
     estoque_minimo: int = Field(5, ge=0)
 
 
 class ProdutoUpdate(BaseModel):
     nome: str = Field(..., min_length=1)
-    preco: float = Field(..., gt=0)
+    preco_custo: float = Field(..., ge=0)
+    preco_venda: float = Field(..., gt=0)
+    imposto_percentual: float = Field(0, ge=0)
+    taxa_operacional_percentual: float = Field(0, ge=0)
     estoque_minimo: int | None = Field(None, ge=0)
 
 
 class ProdutoOut(BaseModel):
     id: int
     nome: str
-    preco: float
+    preco_custo: float
+    preco_venda: float
+    imposto_percentual: float
+    taxa_operacional_percentual: float
     quantidade_atual: int
     estoque_minimo: int
 
@@ -315,6 +376,10 @@ class MovimentacaoOut(BaseModel):
     produto_id: int
     tipo: str
     quantidade: int
+    valor_bruto_total: float
+    valor_custo_total: float
+    valor_impostos_total: float
+    lucro_liquido: float
     usuario_id: int | None = None
 
 
@@ -339,6 +404,14 @@ class PrevisaoRupturaOut(BaseModel):
     estoque_atual: int
     media_vendas_diarias: float
     dias_para_esgotar: float | None
+
+
+class DashboardStatsOut(BaseModel):
+    periodo_inicio: str
+    periodo_fim: str
+    valor_bruto_periodo: float
+    valor_impostos_periodo: float
+    lucro_liquido_periodo: float
 
 
 class MovimentacaoTextoIn(BaseModel):
@@ -450,6 +523,24 @@ def normalizar_texto(value: str) -> str:
     return without_accents.lower().strip()
 
 
+def _parse_periodo_datetime(value: str | None, fallback: datetime, field: str) -> datetime:
+    if not value:
+        return fallback
+
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Parametro de periodo invalido: {field}.",
+        ) from exc
+
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone().replace(tzinfo=None)
+
+    return parsed
+
+
 def executar_movimentacao(mov: MovimentacaoIn, usuario: UsuarioOut) -> dict:
     with get_db() as conn:
         with conn.cursor() as cursor:
@@ -473,20 +564,73 @@ def executar_movimentacao(mov: MovimentacaoIn, usuario: UsuarioOut) -> dict:
                         ),
                     )
 
+            valor_bruto_total = 0.0
+            valor_custo_total = 0.0
+            valor_impostos_total = 0.0
+            lucro_liquido = 0.0
+
+            if mov.tipo == "saida":
+                valor_bruto_total = round(
+                    mov.quantidade * float(produto["preco_venda"] or 0),
+                    2,
+                )
+                valor_custo_total = round(
+                    mov.quantidade * float(produto["preco_custo"] or 0),
+                    2,
+                )
+                carga_percentual = float(produto["imposto_percentual"] or 0) + float(
+                    produto["taxa_operacional_percentual"] or 0
+                )
+                valor_impostos_total = round(
+                    valor_bruto_total * (carga_percentual / 100),
+                    2,
+                )
+                lucro_liquido = round(
+                    valor_bruto_total - valor_custo_total - valor_impostos_total,
+                    2,
+                )
+
             cursor.execute(
                 "UPDATE produto SET quantidade_atual = %s WHERE id = %s",
                 (nova_qtd, mov.produto_id),
             )
             cursor.execute(
                 """
-                INSERT INTO movimentacao (produto_id, usuario_id, tipo, quantidade)
-                VALUES (%s, %s, %s, %s)
+                INSERT INTO movimentacao (
+                    produto_id,
+                    usuario_id,
+                    tipo,
+                    quantidade,
+                    valor_bruto_total,
+                    valor_custo_total,
+                    valor_impostos_total,
+                    lucro_liquido
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                (mov.produto_id, usuario.id, mov.tipo, mov.quantidade),
+                (
+                    mov.produto_id,
+                    usuario.id,
+                    mov.tipo,
+                    mov.quantidade,
+                    valor_bruto_total,
+                    valor_custo_total,
+                    valor_impostos_total,
+                    lucro_liquido,
+                ),
             )
             cursor.execute(
                 """
-                SELECT id, produto_id, usuario_id, tipo, quantidade
+                SELECT
+                    id,
+                    produto_id,
+                    usuario_id,
+                    tipo,
+                    quantidade,
+                    valor_bruto_total,
+                    valor_custo_total,
+                    valor_impostos_total,
+                    lucro_liquido
                 FROM movimentacao
                 WHERE id = %s
                 """,
@@ -724,12 +868,23 @@ def cadastrar_produto(
         with conn.cursor() as cursor:
             cursor.execute(
                 """
-                INSERT INTO produto (nome, preco, quantidade_atual, estoque_minimo)
-                VALUES (%s, %s, %s, %s)
+                INSERT INTO produto (
+                    nome,
+                    preco_custo,
+                    preco_venda,
+                    imposto_percentual,
+                    taxa_operacional_percentual,
+                    quantidade_atual,
+                    estoque_minimo
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     produto.nome,
-                    produto.preco,
+                    produto.preco_custo,
+                    produto.preco_venda,
+                    produto.imposto_percentual,
+                    produto.taxa_operacional_percentual,
                     produto.quantidade_atual,
                     produto.estoque_minimo,
                 ),
@@ -767,10 +922,24 @@ def editar_produto(
             cursor.execute(
                 """
                 UPDATE produto
-                SET nome = %s, preco = %s, estoque_minimo = %s
+                SET
+                    nome = %s,
+                    preco_custo = %s,
+                    preco_venda = %s,
+                    imposto_percentual = %s,
+                    taxa_operacional_percentual = %s,
+                    estoque_minimo = %s
                 WHERE id = %s
                 """,
-                (produto.nome, produto.preco, estoque_minimo, produto_id),
+                (
+                    produto.nome,
+                    produto.preco_custo,
+                    produto.preco_venda,
+                    produto.imposto_percentual,
+                    produto.taxa_operacional_percentual,
+                    estoque_minimo,
+                    produto_id,
+                ),
             )
             cursor.execute("SELECT * FROM produto WHERE id = %s", (produto_id,))
             produto_atualizado = cursor.fetchone()
@@ -812,6 +981,10 @@ def listar_movimentacoes(_usuario: UsuarioOut = Depends(require_admin)):
                     COALESCE(p.nome, 'Produto removido') AS produto_nome,
                     m.tipo,
                     m.quantidade,
+                    m.valor_bruto_total,
+                    m.valor_custo_total,
+                    m.valor_impostos_total,
+                    m.lucro_liquido,
                     m.usuario_id,
                     u.username AS usuario_username,
                     DATE_FORMAT(m.criado_em, '%Y-%m-%d %H:%i:%s') AS data_hora
@@ -833,6 +1006,52 @@ def registrar_movimentacao(
     movimentacao = executar_movimentacao(mov, usuario)
     background_tasks.add_task(verificar_alerta_estoque_baixo, mov.produto_id)
     return movimentacao
+
+
+@app.get("/dashboard/estatisticas", response_model=DashboardStatsOut)
+def obter_estatisticas_dashboard(
+    inicio: str | None = None,
+    fim: str | None = None,
+    _usuario: UsuarioOut = Depends(get_current_user),
+):
+    agora = datetime.now()
+    periodo_inicio = _parse_periodo_datetime(
+        inicio,
+        agora.replace(day=1, hour=0, minute=0, second=0, microsecond=0),
+        "inicio",
+    )
+    periodo_fim = _parse_periodo_datetime(fim, agora, "fim")
+
+    if periodo_inicio >= periodo_fim:
+        raise HTTPException(
+            status_code=400,
+            detail="O inicio do periodo deve ser anterior ao fim.",
+        )
+
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    COALESCE(SUM(valor_bruto_total), 0) AS valor_bruto_periodo,
+                    COALESCE(SUM(valor_impostos_total), 0) AS valor_impostos_periodo,
+                    COALESCE(SUM(lucro_liquido), 0) AS lucro_liquido_periodo
+                FROM movimentacao
+                WHERE tipo = 'saida'
+                    AND criado_em >= %s
+                    AND criado_em <= %s
+                """,
+                (periodo_inicio, periodo_fim),
+            )
+            row = cursor.fetchone()
+
+    return {
+        "periodo_inicio": periodo_inicio.isoformat(timespec="seconds"),
+        "periodo_fim": periodo_fim.isoformat(timespec="seconds"),
+        "valor_bruto_periodo": float(row["valor_bruto_periodo"] or 0),
+        "valor_impostos_periodo": float(row["valor_impostos_periodo"] or 0),
+        "lucro_liquido_periodo": float(row["lucro_liquido_periodo"] or 0),
+    }
 
 
 # ---------------------------------------------------------------------------
