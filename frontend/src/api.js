@@ -90,3 +90,18 @@ export async function registrarMovimentacao(mov) {
     body: JSON.stringify(mov),
   });
 }
+
+export async function listarAlertas() {
+  return apiRequest("/alertas");
+}
+
+export async function listarPrevisaoRuptura() {
+  return apiRequest("/ia/previsao-ruptura");
+}
+
+export async function registrarMovimentacaoTexto(payload) {
+  return apiRequest("/ia/movimentacao-texto", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}

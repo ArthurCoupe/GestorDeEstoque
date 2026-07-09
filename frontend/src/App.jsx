@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Bell, Bot, Loader2 } from "lucide-react";
 import toast, { Toaster } from "react-hot-toast";
 import {
   BrowserRouter,
@@ -24,10 +24,13 @@ import {
   editarProduto,
   excluirProduto,
   getAuthToken,
+  listarAlertas,
   listarMovimentacoes,
+  listarPrevisaoRuptura,
   listarProdutos,
   loginUsuario,
   registrarMovimentacao,
+  registrarMovimentacaoTexto,
   setAuthToken,
 } from "./api";
 import "./App.css";
@@ -36,6 +39,48 @@ const currencyFormatter = new Intl.NumberFormat("pt-BR", {
   style: "currency",
   currency: "BRL",
 });
+
+function decodeAuthToken(token) {
+  if (!token) return null;
+
+  try {
+    const payload = token.split(".")[1];
+    const normalizedPayload = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const paddedPayload = normalizedPayload.padEnd(
+      normalizedPayload.length + ((4 - (normalizedPayload.length % 4)) % 4),
+      "=",
+    );
+    const data = JSON.parse(atob(paddedPayload));
+
+    return {
+      id: data.user_id,
+      username: data.sub,
+      role: data.role ?? "admin",
+    };
+  } catch {
+    return null;
+  }
+}
+
+function formatRole(role) {
+  return role === "admin" ? "Admin" : "Operador";
+}
+
+function formatarPrevisao(previsao) {
+  if (!previsao) {
+    return "Sem dados";
+  }
+
+  if (previsao.estoque_atual === 0) {
+    return "Esgotado";
+  }
+
+  if (previsao.dias_para_esgotar === null) {
+    return "Sem consumo recente";
+  }
+
+  return `${previsao.dias_para_esgotar} dia(s)`;
+}
 
 function LoadingLabel({ text }) {
   return (
@@ -47,6 +92,8 @@ function LoadingLabel({ text }) {
 }
 
 function getStatus(produto) {
+  const estoqueMinimo = produto.estoque_minimo ?? 5;
+
   if (produto.quantidade_atual === 0) {
     return {
       label: "Esgotado",
@@ -54,7 +101,7 @@ function getStatus(produto) {
     };
   }
 
-  if (produto.quantidade_atual <= 5) {
+  if (produto.quantidade_atual <= estoqueMinimo) {
     return {
       label: "Baixo",
       classes: "bg-amber-50 text-amber-700 ring-amber-200",
@@ -247,6 +294,7 @@ function CardTitle({ eyebrow, title, titleId }) {
 }
 
 function FormProduto({ onSaved }) {
+  const [estoqueMinimo, setEstoqueMinimo] = useState("5");
   const [nome, setNome] = useState("");
   const [preco, setPreco] = useState("");
   const [qtd, setQtd] = useState("0");
@@ -261,9 +309,11 @@ function FormProduto({ onSaved }) {
         nome: nome.trim(),
         preco: parseFloat(preco),
         quantidade_atual: parseInt(qtd, 10),
+        estoque_minimo: parseInt(estoqueMinimo, 10),
       });
 
       setNome("");
+      setEstoqueMinimo("5");
       setPreco("");
       setQtd("0");
       toast.success("Produto cadastrado com sucesso.");
@@ -321,6 +371,21 @@ function FormProduto({ onSaved }) {
             min="0"
             value={qtd}
             onChange={(event) => setQtd(event.target.value)}
+            required
+          />
+        </label>
+
+        <label className="block" htmlFor="produto-estoque-minimo">
+          <span className="text-sm font-medium text-slate-700">
+            Estoque minimo
+          </span>
+          <input
+            id="produto-estoque-minimo"
+            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
+            type="number"
+            min="0"
+            value={estoqueMinimo}
+            onChange={(event) => setEstoqueMinimo(event.target.value)}
             required
           />
         </label>
@@ -465,13 +530,22 @@ function FormMovimentacao({ produtos, onSaved }) {
   );
 }
 
-function DashboardEstoque({ produtos }) {
+function DashboardEstoque({ previsoes, produtos }) {
+  const previsoesPorProdutoId = useMemo(
+    () =>
+      new Map(
+        previsoes.map((previsao) => [previsao.produto_id, previsao]),
+      ),
+    [previsoes],
+  );
   const topProdutos = useMemo(
     () =>
       [...produtos]
         .sort((a, b) => b.quantidade_atual - a.quantidade_atual)
         .slice(0, 5)
         .map((produto) => ({
+          id: produto.id,
+          nomeCompleto: produto.nome,
           nome:
             produto.nome.length > 18
               ? `${produto.nome.slice(0, 16)}...`
@@ -538,6 +612,41 @@ function DashboardEstoque({ produtos }) {
             </div>
           )}
         </div>
+
+        {topProdutos.length > 0 && (
+          <div className="mt-5 overflow-x-auto">
+            <table className="min-w-full divide-y divide-slate-200">
+              <thead>
+                <tr>
+                  <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Produto
+                  </th>
+                  <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Estoque
+                  </th>
+                  <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Previsao de esgotamento
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {topProdutos.map((produto) => (
+                  <tr className="transition hover:bg-slate-50" key={produto.id}>
+                    <td className="min-w-52 px-3 py-3 text-sm font-semibold text-slate-950">
+                      {produto.nomeCompleto}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-3 text-sm font-semibold text-slate-950">
+                      {produto.quantidade}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-3 text-sm text-slate-700">
+                      {formatarPrevisao(previsoesPorProdutoId.get(produto.id))}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-1">
@@ -564,7 +673,7 @@ function DashboardEstoque({ produtos }) {
   );
 }
 
-function TabelaProdutos({ produtos, onDelete, onEdit }) {
+function TabelaProdutos({ isAdmin, produtos, onDelete, onEdit }) {
   const [busca, setBusca] = useState("");
   const indiceProdutosPorNome = useMemo(
     () => criarIndiceProdutosPorNome(produtos),
@@ -665,9 +774,11 @@ function TabelaProdutos({ produtos, onDelete, onEdit }) {
                 <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Status
                 </th>
-                <th className="px-3 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Acoes
-                </th>
+                {isAdmin && (
+                  <th className="px-3 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Acoes
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -698,24 +809,26 @@ function TabelaProdutos({ produtos, onDelete, onEdit }) {
                         {status.label}
                       </span>
                     </td>
-                    <td className="whitespace-nowrap px-3 py-3">
-                      <div className="flex justify-end gap-2">
-                        <button
-                          className="rounded-md border border-cyan-200 bg-cyan-50 px-2.5 py-1.5 text-xs font-semibold text-cyan-700 transition hover:bg-cyan-100 focus:outline-none focus:ring-4 focus:ring-cyan-100"
-                          type="button"
-                          onClick={() => onEdit(produto)}
-                        >
-                          Editar
-                        </button>
-                        <button
-                          className="rounded-md border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs font-semibold text-red-700 transition hover:bg-red-100 focus:outline-none focus:ring-4 focus:ring-red-100"
-                          type="button"
-                          onClick={() => onDelete(produto)}
-                        >
-                          Excluir
-                        </button>
-                      </div>
-                    </td>
+                    {isAdmin && (
+                      <td className="whitespace-nowrap px-3 py-3">
+                        <div className="flex justify-end gap-2">
+                          <button
+                            className="rounded-md border border-cyan-200 bg-cyan-50 px-2.5 py-1.5 text-xs font-semibold text-cyan-700 transition hover:bg-cyan-100 focus:outline-none focus:ring-4 focus:ring-cyan-100"
+                            type="button"
+                            onClick={() => onEdit(produto)}
+                          >
+                            Editar
+                          </button>
+                          <button
+                            className="rounded-md border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs font-semibold text-red-700 transition hover:bg-red-100 focus:outline-none focus:ring-4 focus:ring-red-100"
+                            type="button"
+                            onClick={() => onDelete(produto)}
+                          >
+                            Excluir
+                          </button>
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 );
               })}
@@ -796,6 +909,9 @@ function HistoricoMovimentacoes({ movimentacoes }) {
 
 function EditarProdutoModal({ onClose, onSaved, produto }) {
   const dialogRef = useDialogFocusTrap(onClose);
+  const [estoqueMinimo, setEstoqueMinimo] = useState(
+    String(produto.estoque_minimo ?? 5),
+  );
   const [nome, setNome] = useState(produto.nome);
   const [preco, setPreco] = useState(String(produto.preco));
   const [loading, setLoading] = useState(false);
@@ -808,6 +924,7 @@ function EditarProdutoModal({ onClose, onSaved, produto }) {
       await editarProduto(produto.id, {
         nome: nome.trim(),
         preco: parseFloat(preco),
+        estoque_minimo: parseInt(estoqueMinimo, 10),
       });
       toast.success("Produto atualizado com sucesso.");
       await onSaved();
@@ -858,6 +975,21 @@ function EditarProdutoModal({ onClose, onSaved, produto }) {
               min="0.01"
               value={preco}
               onChange={(event) => setPreco(event.target.value)}
+              required
+            />
+          </label>
+
+          <label className="block" htmlFor="editar-produto-estoque-minimo">
+            <span className="text-sm font-medium text-slate-700">
+              Estoque minimo
+            </span>
+            <input
+              id="editar-produto-estoque-minimo"
+              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
+              type="number"
+              min="0"
+              value={estoqueMinimo}
+              onChange={(event) => setEstoqueMinimo(event.target.value)}
               required
             />
           </label>
@@ -939,6 +1071,83 @@ function ExcluirProdutoModal({ onClose, onConfirm, produto }) {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function AssistenteIAModal({ onClose, onSaved }) {
+  const dialogRef = useDialogFocusTrap(onClose);
+  const [loading, setLoading] = useState(false);
+  const [texto, setTexto] = useState("");
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setLoading(true);
+
+    try {
+      const data = await registrarMovimentacaoTexto({ texto: texto.trim() });
+      toast.success(
+        `Movimentacao ${data.tipo} registrada para ${data.produto_nome}.`,
+      );
+      setTexto("");
+      await onSaved();
+      onClose();
+    } catch (err) {
+      toast.error(err.message || "Nao foi possivel executar o comando IA.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/50 px-4">
+      <form
+        aria-labelledby="assistente-ia-title"
+        aria-modal="true"
+        className="w-full max-w-lg rounded-lg border border-slate-200 bg-white p-6 shadow-xl"
+        onSubmit={handleSubmit}
+        ref={dialogRef}
+        role="dialog"
+        tabIndex={-1}
+      >
+        <CardTitle
+          eyebrow="Assistente IA"
+          title="Comando de Voz/Texto"
+          titleId="assistente-ia-title"
+        />
+
+        <label className="block" htmlFor="assistente-ia-texto">
+          <span className="text-sm font-medium text-slate-700">
+            Descreva a movimentacao
+          </span>
+          <textarea
+            id="assistente-ia-texto"
+            className="mt-1 min-h-32 w-full resize-y rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
+            value={texto}
+            onChange={(event) => setTexto(event.target.value)}
+            required
+            placeholder="Ex: Chegaram 20 unidades do mouse"
+          />
+        </label>
+
+        <div className="mt-6 flex justify-end gap-2">
+          <button
+            className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-cyan-100"
+            type="button"
+            onClick={onClose}
+            disabled={loading}
+          >
+            Cancelar
+          </button>
+          <button
+            className="inline-flex items-center justify-center rounded-md bg-cyan-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-cyan-800 focus:outline-none focus:ring-4 focus:ring-cyan-100 disabled:cursor-not-allowed disabled:opacity-60"
+            type="submit"
+            disabled={loading}
+          >
+            {loading ? <LoadingLabel text="Executando..." /> : "Executar"}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }
@@ -1048,7 +1257,64 @@ function getNavLinkClass({ isActive }) {
   }`;
 }
 
-function AppHeader({ onLogout }) {
+function AlertasButton({ alertas }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const alertasCount = alertas.length;
+
+  return (
+    <div className="relative">
+      <button
+        aria-expanded={isOpen}
+        aria-label={`Alertas de estoque: ${alertasCount}`}
+        className="relative inline-flex h-10 w-10 items-center justify-center rounded-md border border-slate-300 text-slate-600 transition hover:bg-slate-100 hover:text-slate-950 focus:outline-none focus:ring-4 focus:ring-cyan-100"
+        type="button"
+        onClick={() => setIsOpen((current) => !current)}
+      >
+        <Bell className="h-4 w-4" aria-hidden="true" />
+        {alertasCount > 0 && (
+          <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white">
+            {alertasCount}
+          </span>
+        )}
+      </button>
+
+      {isOpen && (
+        <div className="absolute right-0 z-30 mt-2 w-80 rounded-lg border border-slate-200 bg-white p-4 shadow-xl">
+          <p className="text-sm font-semibold text-slate-950">
+            Alertas de estoque
+          </p>
+          {alertasCount === 0 ? (
+            <p className="mt-3 text-sm text-slate-500">
+              Nenhum alerta pendente.
+            </p>
+          ) : (
+            <ul className="mt-3 grid max-h-72 gap-3 overflow-y-auto">
+              {alertas.map((alerta) => (
+                <li
+                  className="rounded-md border border-red-100 bg-red-50 px-3 py-2"
+                  key={alerta.id}
+                >
+                  <p className="text-sm font-semibold text-red-700">
+                    {alerta.produto_nome}
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-red-700">
+                    {alerta.mensagem}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AppHeader({ alertas, isAdmin, onLogout, onOpenAssistant, user }) {
+  const visibleNavItems = navItems.filter(
+    (item) => item.to !== "/historico" || isAdmin,
+  );
+
   return (
     <header className="border-b border-slate-200 bg-white">
       <a
@@ -1072,7 +1338,7 @@ function AppHeader({ onLogout }) {
           aria-label="Navegacao principal"
           className="flex flex-wrap gap-2 text-sm font-medium"
         >
-          {navItems.map((item) => (
+          {visibleNavItems.map((item) => (
             <NavLink
               className={getNavLinkClass}
               end={item.to === "/"}
@@ -1082,6 +1348,20 @@ function AppHeader({ onLogout }) {
               {item.label}
             </NavLink>
           ))}
+          <button
+            className="inline-flex items-center gap-2 rounded-md border border-cyan-200 bg-cyan-50 px-3 py-2 text-cyan-700 transition hover:bg-cyan-100 focus:outline-none focus:ring-4 focus:ring-cyan-100"
+            type="button"
+            onClick={onOpenAssistant}
+          >
+            <Bot className="h-4 w-4" aria-hidden="true" />
+            Comando IA
+          </button>
+          <AlertasButton alertas={alertas} />
+          {user && (
+            <span className="inline-flex items-center rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-600">
+              {user.username} - {formatRole(user.role)}
+            </span>
+          )}
           <button
             className="rounded-md border border-slate-300 px-3 py-2 text-slate-600 transition hover:bg-slate-100 hover:text-slate-950 focus:outline-none focus:ring-4 focus:ring-cyan-100"
             type="button"
@@ -1130,15 +1410,20 @@ function PageLayout({ children, erroGlobal, isLoadingDados }) {
   );
 }
 
-function DashboardPage({ produtos }) {
-  return <DashboardEstoque produtos={produtos} />;
+function DashboardPage({ previsoes, produtos }) {
+  return <DashboardEstoque previsoes={previsoes} produtos={produtos} />;
 }
 
-function ProdutosPage({ onDelete, onEdit, onSaved, produtos }) {
+function ProdutosPage({ isAdmin, onDelete, onEdit, onSaved, produtos }) {
   return (
-    <div className="grid gap-6 xl:grid-cols-[360px_1fr] xl:items-start">
-      <FormProduto onSaved={onSaved} />
+    <div
+      className={`grid gap-6 ${
+        isAdmin ? "xl:grid-cols-[360px_1fr] xl:items-start" : ""
+      }`}
+    >
+      {isAdmin && <FormProduto onSaved={onSaved} />}
       <TabelaProdutos
+        isAdmin={isAdmin}
         produtos={produtos}
         onDelete={onDelete}
         onEdit={onEdit}
@@ -1161,21 +1446,27 @@ function HistoricoPage({ movimentacoes }) {
 
 function AppRoutes({
   erroGlobal,
+  isAdmin,
   isLoadingDados,
   movimentacoes,
   onDeleteProduto,
   onEditProduto,
   onSaved,
+  previsoes,
   produtos,
 }) {
   return (
     <PageLayout erroGlobal={erroGlobal} isLoadingDados={isLoadingDados}>
       <Routes>
-        <Route path="/" element={<DashboardPage produtos={produtos} />} />
+        <Route
+          path="/"
+          element={<DashboardPage previsoes={previsoes} produtos={produtos} />}
+        />
         <Route
           path="/produtos"
           element={
             <ProdutosPage
+              isAdmin={isAdmin}
               produtos={produtos}
               onDelete={onDeleteProduto}
               onEdit={onEditProduto}
@@ -1189,7 +1480,13 @@ function AppRoutes({
         />
         <Route
           path="/historico"
-          element={<HistoricoPage movimentacoes={movimentacoes} />}
+          element={
+            isAdmin ? (
+              <HistoricoPage movimentacoes={movimentacoes} />
+            ) : (
+              <Navigate to="/" replace />
+            )
+          }
         />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
@@ -1199,17 +1496,24 @@ function AppRoutes({
 
 export default function App() {
   const [authToken, setAuthTokenState] = useState(() => getAuthToken());
+  const [alertas, setAlertas] = useState([]);
+  const [assistenteAberto, setAssistenteAberto] = useState(false);
   const [erroGlobal, setErroGlobal] = useState("");
   const [isLoadingDados, setIsLoadingDados] = useState(false);
   const [movimentacoes, setMovimentacoes] = useState([]);
+  const [previsoes, setPrevisoes] = useState([]);
   const [produtoEditando, setProdutoEditando] = useState(null);
   const [produtoExcluindo, setProdutoExcluindo] = useState(null);
   const [produtos, setProdutos] = useState([]);
+  const authUser = useMemo(() => decodeAuthToken(authToken), [authToken]);
+  const isAdmin = authUser?.role === "admin";
 
   const handleLogout = useCallback(() => {
     clearAuthToken();
     setAuthTokenState(null);
+    setAlertas([]);
     setProdutos([]);
+    setPrevisoes([]);
     setMovimentacoes([]);
     setErroGlobal("");
     toast.success("Sessao encerrada.");
@@ -1222,12 +1526,23 @@ export default function App() {
 
     setIsLoadingDados(true);
     try {
-      const [produtosData, movimentacoesData] = await Promise.all([
+      const requests = [
         listarProdutos(),
-        listarMovimentacoes(),
-      ]);
+        listarAlertas(),
+        listarPrevisaoRuptura(),
+      ];
+
+      if (isAdmin) {
+        requests.push(listarMovimentacoes());
+      }
+
+      const [produtosData, alertasData, previsoesData, movimentacoesData] =
+        await Promise.all(requests);
+
       setProdutos(produtosData);
-      setMovimentacoes(movimentacoesData);
+      setAlertas(alertasData);
+      setPrevisoes(previsoesData);
+      setMovimentacoes(isAdmin ? movimentacoesData : []);
       setErroGlobal("");
     } catch (err) {
       if (err.status === 401 || err.status === 403) {
@@ -1237,13 +1552,13 @@ export default function App() {
       }
 
       const message =
-        "Nao foi possivel conectar ao backend em http://localhost:8000.";
+        "Nao foi possivel conectar ao backend em http://127.0.0.1:8000.";
       setErroGlobal(message);
       toast.error(message, { id: "backend-offline" });
     } finally {
       setIsLoadingDados(false);
     }
-  }, [authToken, handleLogout]);
+  }, [authToken, handleLogout, isAdmin]);
 
   async function handleExcluirProduto(produto) {
     try {
@@ -1267,15 +1582,23 @@ export default function App() {
   return (
     <BrowserRouter>
       <div className="min-h-screen bg-slate-100 text-slate-950">
-        <AppHeader onLogout={handleLogout} />
+        <AppHeader
+          alertas={alertas}
+          isAdmin={isAdmin}
+          onLogout={handleLogout}
+          onOpenAssistant={() => setAssistenteAberto(true)}
+          user={authUser}
+        />
 
         <AppRoutes
           erroGlobal={erroGlobal}
+          isAdmin={isAdmin}
           isLoadingDados={isLoadingDados}
           movimentacoes={movimentacoes}
           onDeleteProduto={setProdutoExcluindo}
           onEditProduto={setProdutoEditando}
           onSaved={carregar}
+          previsoes={previsoes}
           produtos={produtos}
         />
 
@@ -1292,6 +1615,13 @@ export default function App() {
             produto={produtoExcluindo}
             onClose={() => setProdutoExcluindo(null)}
             onConfirm={handleExcluirProduto}
+          />
+        )}
+
+        {assistenteAberto && (
+          <AssistenteIAModal
+            onClose={() => setAssistenteAberto(false)}
+            onSaved={carregar}
           />
         )}
 
