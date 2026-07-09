@@ -9,6 +9,8 @@ import {
   FileSpreadsheet,
   FileText,
   Loader2,
+  Mic,
+  MicOff,
   Moon,
   Sun,
 } from "lucide-react";
@@ -1847,7 +1849,146 @@ function ExcluirProdutoModal({ onClose, onConfirm, produto }) {
 function AssistenteIAModal({ onClose, onSaved }) {
   const dialogRef = useDialogFocusTrap(onClose);
   const [loading, setLoading] = useState(false);
+  const [isListening, setIsListening] = useState(false);
   const [texto, setTexto] = useState("");
+  const recognitionRef = useRef(null);
+  const speechTimeoutRef = useRef(null);
+  const speechResultRef = useRef(false);
+  const speechErrorRef = useRef(false);
+  const stopRequestedRef = useRef(false);
+
+  function clearSpeechTimeout() {
+    if (speechTimeoutRef.current) {
+      clearTimeout(speechTimeoutRef.current);
+      speechTimeoutRef.current = null;
+    }
+  }
+
+  function stopVoiceRecognition() {
+    stopRequestedRef.current = true;
+    clearSpeechTimeout();
+    setIsListening(false);
+
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+    }
+  }
+
+  function handleVoiceToggle() {
+    if (isListening) {
+      stopVoiceRecognition();
+      return;
+    }
+
+    const SpeechRecognition =
+      typeof window !== "undefined" &&
+      (window.SpeechRecognition || window.webkitSpeechRecognition);
+
+    if (!SpeechRecognition) {
+      toast.error("Seu navegador nao suporta reconhecimento de voz.");
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognitionRef.current = recognition;
+    speechResultRef.current = false;
+    speechErrorRef.current = false;
+    stopRequestedRef.current = false;
+
+    recognition.lang = "pt-BR";
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => {
+      setIsListening(true);
+    };
+
+    recognition.onresult = (event) => {
+      speechResultRef.current = true;
+      const transcript = event.results?.[0]?.[0]?.transcript?.trim();
+
+      if (!transcript) {
+        speechErrorRef.current = true;
+        toast.error("Nao foi possivel entender o audio.");
+        return;
+      }
+
+      setTexto(transcript);
+      toast.success("Texto capturado por voz.");
+    };
+
+    recognition.onerror = (event) => {
+      speechErrorRef.current = true;
+      clearSpeechTimeout();
+      setIsListening(false);
+
+      if (event.error === "aborted") {
+        return;
+      }
+
+      if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+        toast.error("Permissao do microfone negada pelo navegador.");
+        return;
+      }
+
+      if (event.error === "audio-capture") {
+        toast.error("Nao foi possivel acessar o microfone.");
+        return;
+      }
+
+      if (event.error === "no-speech") {
+        toast.error("Nao foi possivel entender o audio. Tente novamente.");
+        return;
+      }
+
+      toast.error("Falha ao reconhecer a voz. Tente novamente.");
+    };
+
+    recognition.onend = () => {
+      clearSpeechTimeout();
+      setIsListening(false);
+      recognitionRef.current = null;
+
+      if (
+        !speechResultRef.current &&
+        !speechErrorRef.current &&
+        !stopRequestedRef.current
+      ) {
+        toast.error("Nao foi possivel entender o audio. Tente novamente.");
+      }
+    };
+
+    try {
+      recognition.start();
+      speechTimeoutRef.current = window.setTimeout(() => {
+        if (!speechResultRef.current) {
+          speechErrorRef.current = true;
+          toast.error("Nao foi possivel entender o audio no tempo limite.");
+          recognition.abort();
+        }
+      }, 10000);
+    } catch {
+      recognitionRef.current = null;
+      setIsListening(false);
+      toast.error("Nao foi possivel iniciar a gravacao de voz.");
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      stopRequestedRef.current = true;
+      clearSpeechTimeout();
+
+      if (recognitionRef.current) {
+        recognitionRef.current.onend = null;
+        recognitionRef.current.onerror = null;
+        recognitionRef.current.onresult = null;
+        recognitionRef.current.abort();
+        recognitionRef.current = null;
+      }
+    };
+  }, []);
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -1889,6 +2030,8 @@ function AssistenteIAModal({ onClose, onSaved }) {
           <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
             Descreva a movimentacao
           </span>
+        </label>
+        <div className="mt-1 flex items-start gap-2">
           <textarea
             id="assistente-ia-texto"
             className="mt-1 min-h-32 w-full resize-y rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-cyan-500 dark:focus:ring-cyan-900/60"
@@ -1897,7 +2040,28 @@ function AssistenteIAModal({ onClose, onSaved }) {
             required
             placeholder="Ex: Chegaram 20 unidades do mouse"
           />
-        </label>
+          <button
+            aria-label={
+              isListening ? "Parar gravação de voz" : "Iniciar gravação de voz"
+            }
+            aria-pressed={isListening}
+            className={`mt-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border text-sm font-semibold transition focus:outline-none focus:ring-4 disabled:cursor-not-allowed disabled:opacity-60 ${
+              isListening
+                ? "animate-pulse border-red-500 bg-red-600 text-white hover:bg-red-700 focus:ring-red-100 dark:focus:ring-red-900/60"
+                : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50 focus:ring-cyan-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800 dark:focus:ring-cyan-900/60"
+            }`}
+            disabled={loading}
+            onClick={handleVoiceToggle}
+            title={isListening ? "Parar gravação" : "Iniciar gravação"}
+            type="button"
+          >
+            {isListening ? (
+              <MicOff className="h-4 w-4" aria-hidden="true" />
+            ) : (
+              <Mic className="h-4 w-4" aria-hidden="true" />
+            )}
+          </button>
+        </div>
 
         <div className="mt-6 flex justify-end gap-2">
           <button
@@ -1911,7 +2075,7 @@ function AssistenteIAModal({ onClose, onSaved }) {
           <button
             className="inline-flex items-center justify-center rounded-md bg-cyan-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-cyan-800 focus:outline-none focus:ring-4 focus:ring-cyan-100 disabled:cursor-not-allowed disabled:opacity-60"
             type="submit"
-            disabled={loading}
+            disabled={loading || isListening}
           >
             {loading ? <LoadingLabel text="Executando..." /> : "Executar"}
           </button>
