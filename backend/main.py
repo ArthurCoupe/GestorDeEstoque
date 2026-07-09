@@ -505,6 +505,14 @@ def verificar_alerta_estoque_baixo(produto_id: int) -> None:
                 return
 
             if produto["quantidade_atual"] >= produto["estoque_minimo"]:
+                cursor.execute(
+                    """
+                    UPDATE alertas
+                    SET lido_boolean = TRUE
+                    WHERE produto_id = %s AND lido_boolean = FALSE
+                    """,
+                    (produto_id,),
+                )
                 return
 
             mensagem = (
@@ -709,6 +717,7 @@ def listar_produtos(_usuario: UsuarioOut = Depends(get_current_user)):
 @app.post("/produtos", response_model=ProdutoOut, status_code=201)
 def cadastrar_produto(
     produto: ProdutoIn,
+    background_tasks: BackgroundTasks,
     _usuario: UsuarioOut = Depends(require_admin),
 ):
     with get_db() as conn:
@@ -729,13 +738,17 @@ def cadastrar_produto(
                 "SELECT * FROM produto WHERE id = %s",
                 (cursor.lastrowid,),
             )
-            return cursor.fetchone()
+            produto_criado = cursor.fetchone()
+
+    background_tasks.add_task(verificar_alerta_estoque_baixo, produto_criado["id"])
+    return produto_criado
 
 
 @app.put("/produtos/{produto_id}", response_model=ProdutoOut)
 def editar_produto(
     produto_id: int,
     produto: ProdutoUpdate,
+    background_tasks: BackgroundTasks,
     _usuario: UsuarioOut = Depends(require_admin),
 ):
     with get_db() as conn:
@@ -760,7 +773,10 @@ def editar_produto(
                 (produto.nome, produto.preco, estoque_minimo, produto_id),
             )
             cursor.execute("SELECT * FROM produto WHERE id = %s", (produto_id,))
-            return cursor.fetchone()
+            produto_atualizado = cursor.fetchone()
+
+    background_tasks.add_task(verificar_alerta_estoque_baixo, produto_id)
+    return produto_atualizado
 
 
 @app.delete("/produtos/{produto_id}", status_code=204)
