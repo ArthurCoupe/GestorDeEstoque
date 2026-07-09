@@ -603,22 +603,18 @@ def executar_movimentacao(mov: MovimentacaoIn, usuario: UsuarioOut) -> dict:
             else:
                 nova_qtd = produto["quantidade_atual"]
 
-            valor_bruto_total = 0.0
-            valor_custo_total = 0.0
-            valor_impostos_total = 0.0
-            lucro_liquido = 0.0
+            valor_custo_total = round(
+                mov.quantidade * float(produto["preco_custo"] or 0),
+                2,
+            )
+            carga_percentual = float(produto["imposto_percentual"] or 0) + float(
+                produto["taxa_operacional_percentual"] or 0
+            )
 
             if mov.tipo == "saida":
                 valor_bruto_total = round(
                     mov.quantidade * float(produto["preco_venda"] or 0),
                     2,
-                )
-                valor_custo_total = round(
-                    mov.quantidade * float(produto["preco_custo"] or 0),
-                    2,
-                )
-                carga_percentual = float(produto["imposto_percentual"] or 0) + float(
-                    produto["taxa_operacional_percentual"] or 0
                 )
                 valor_impostos_total = round(
                     valor_bruto_total * (carga_percentual / 100),
@@ -626,6 +622,16 @@ def executar_movimentacao(mov: MovimentacaoIn, usuario: UsuarioOut) -> dict:
                 )
                 lucro_liquido = round(
                     valor_bruto_total - valor_custo_total - valor_impostos_total,
+                    2,
+                )
+            else:
+                valor_bruto_total = valor_custo_total
+                valor_impostos_total = round(
+                    valor_bruto_total * (carga_percentual / 100),
+                    2,
+                )
+                lucro_liquido = round(
+                    valor_custo_total + valor_impostos_total,
                     2,
                 )
 
