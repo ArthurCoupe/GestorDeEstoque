@@ -7,14 +7,19 @@ Fase 4:
   - Rotas comerciais protegidas
 """
 
+import json
 import os
+import re
+import unicodedata
+import urllib.error
+import urllib.request
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 import jwt
 import pymysql
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from passlib.context import CryptContext
@@ -36,6 +41,9 @@ JWT_EXPIRES_MINUTES = int(os.getenv("JWT_EXPIRES_MINUTES", "480"))
 
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "")
+OLLAMA_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "60"))
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer()
@@ -325,6 +333,26 @@ class AlertaOut(BaseModel):
     data_hora: str
 
 
+class PrevisaoRupturaOut(BaseModel):
+    produto_id: int
+    produto_nome: str
+    estoque_atual: int
+    media_vendas_diarias: float
+    dias_para_esgotar: float | None
+
+
+class MovimentacaoTextoIn(BaseModel):
+    texto: str = Field(..., min_length=3)
+
+
+class MovimentacaoTextoOut(BaseModel):
+    produto_id: int
+    produto_nome: str
+    tipo: Literal["entrada", "saida"]
+    quantidade: int
+    movimentacao: MovimentacaoOut
+
+
 # ---------------------------------------------------------------------------
 # Autenticacao
 # ---------------------------------------------------------------------------
@@ -409,6 +437,262 @@ def login(credentials: LoginIn):
         )
 
     return TokenOut(access_token=criar_token(usuario))
+
+
+# ---------------------------------------------------------------------------
+# Servicos de dominio
+# ---------------------------------------------------------------------------
+def normalizar_texto(value: str) -> str:
+    normalized = unicodedata.normalize("NFD", value)
+    without_accents = "".join(
+        char for char in normalized if unicodedata.category(char) != "Mn"
+    )
+    return without_accents.lower().strip()
+
+
+def executar_movimentacao(mov: MovimentacaoIn, usuario: UsuarioOut) -> dict:
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT * FROM produto WHERE id = %s", (mov.produto_id,))
+            produto = cursor.fetchone()
+
+            if produto is None:
+                raise HTTPException(status_code=404, detail="Produto nao encontrado.")
+
+            if mov.tipo == "entrada":
+                nova_qtd = produto["quantidade_atual"] + mov.quantidade
+            else:
+                nova_qtd = produto["quantidade_atual"] - mov.quantidade
+                if nova_qtd < 0:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"Estoque insuficiente. "
+                            f"Disponivel: {produto['quantidade_atual']}, "
+                            f"solicitado: {mov.quantidade}."
+                        ),
+                    )
+
+            cursor.execute(
+                "UPDATE produto SET quantidade_atual = %s WHERE id = %s",
+                (nova_qtd, mov.produto_id),
+            )
+            cursor.execute(
+                """
+                INSERT INTO movimentacao (produto_id, usuario_id, tipo, quantidade)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (mov.produto_id, usuario.id, mov.tipo, mov.quantidade),
+            )
+            cursor.execute(
+                """
+                SELECT id, produto_id, usuario_id, tipo, quantidade
+                FROM movimentacao
+                WHERE id = %s
+                """,
+                (cursor.lastrowid,),
+            )
+            return cursor.fetchone()
+
+
+def verificar_alerta_estoque_baixo(produto_id: int) -> None:
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT * FROM produto WHERE id = %s", (produto_id,))
+            produto = cursor.fetchone()
+
+            if produto is None:
+                return
+
+            if produto["quantidade_atual"] >= produto["estoque_minimo"]:
+                return
+
+            mensagem = (
+                f"Estoque baixo para {produto['nome']}: "
+                f"{produto['quantidade_atual']} unidade(s), "
+                f"minimo configurado {produto['estoque_minimo']}."
+            )
+            cursor.execute(
+                """
+                SELECT id
+                FROM alertas
+                WHERE produto_id = %s AND lido_boolean = FALSE
+                LIMIT 1
+                """,
+                (produto_id,),
+            )
+            alerta_existente = cursor.fetchone()
+
+            if alerta_existente:
+                cursor.execute(
+                    """
+                    UPDATE alertas
+                    SET mensagem = %s, data_hora = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                    """,
+                    (mensagem, alerta_existente["id"]),
+                )
+                return
+
+            cursor.execute(
+                """
+                INSERT INTO alertas (produto_id, mensagem)
+                VALUES (%s, %s)
+                """,
+                (produto_id, mensagem),
+            )
+
+
+def extrair_json_ollama(texto_resposta: str) -> dict:
+    try:
+        return json.loads(texto_resposta)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", texto_resposta, re.DOTALL)
+        if not match:
+            raise HTTPException(
+                status_code=502,
+                detail="A resposta do Ollama nao contem um JSON valido.",
+            )
+
+        try:
+            return json.loads(match.group(0))
+        except json.JSONDecodeError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail="A resposta do Ollama nao contem um JSON valido.",
+            ) from exc
+
+
+def resolver_modelo_ollama() -> str:
+    if OLLAMA_MODEL:
+        return OLLAMA_MODEL
+
+    tags_url = OLLAMA_URL.replace("/api/generate", "/api/tags")
+
+    try:
+        with urllib.request.urlopen(
+            tags_url,
+            timeout=OLLAMA_TIMEOUT_SECONDS,
+        ) as response:
+            tags_data = json.loads(response.read().decode("utf-8"))
+    except urllib.error.URLError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Ollama local indisponivel em http://localhost:11434.",
+        ) from exc
+
+    modelos = tags_data.get("models", [])
+    if not modelos:
+        raise HTTPException(
+            status_code=503,
+            detail="Nenhum modelo Ollama local esta instalado.",
+        )
+
+    return modelos[0]["name"]
+
+
+def chamar_ollama_para_movimentacao(texto: str, produtos: list[dict]) -> dict:
+    produtos_prompt = "\n".join(
+        f"- {produto['nome']}" for produto in produtos
+    )
+    prompt = f"""
+Extraia uma movimentacao de estoque do texto do usuario.
+Produtos cadastrados:
+{produtos_prompt}
+
+Responda apenas com JSON valido no formato:
+{{"nome_produto":"nome exato do produto", "tipo":"entrada ou saida", "quantidade":1}}
+
+Regras:
+- Use "saida" para vendas, retirada, baixa, saiu ou acabou.
+- Use "entrada" para chegada, reposicao, compra ou entrada.
+- A quantidade deve ser um inteiro positivo.
+
+Texto: {texto}
+"""
+    payload = {
+        "model": resolver_modelo_ollama(),
+        "prompt": prompt,
+        "stream": False,
+        "format": "json",
+    }
+    request = urllib.request.Request(
+        OLLAMA_URL,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(
+            request,
+            timeout=OLLAMA_TIMEOUT_SECONDS,
+        ) as response:
+            ollama_data = json.loads(response.read().decode("utf-8"))
+    except urllib.error.URLError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Ollama local indisponivel em http://localhost:11434.",
+        ) from exc
+
+    return extrair_json_ollama(ollama_data.get("response", ""))
+
+
+def validar_movimentacao_extraida(extraido: dict) -> dict:
+    nome_produto = (
+        extraido.get("nome_produto")
+        or extraido.get("produto")
+        or extraido.get("nome")
+        or ""
+    )
+    tipo = str(extraido.get("tipo", "")).lower().strip()
+
+    try:
+        quantidade = int(extraido.get("quantidade", 0))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="A IA nao conseguiu identificar uma quantidade valida.",
+        ) from exc
+
+    if tipo not in {"entrada", "saida"}:
+        raise HTTPException(
+            status_code=422,
+            detail="A IA nao conseguiu identificar se a movimentacao e entrada ou saida.",
+        )
+
+    if quantidade <= 0:
+        raise HTTPException(
+            status_code=422,
+            detail="A IA nao conseguiu identificar uma quantidade positiva.",
+        )
+
+    if not nome_produto:
+        raise HTTPException(
+            status_code=422,
+            detail="A IA nao conseguiu identificar o produto.",
+        )
+
+    return {
+        "nome_produto": nome_produto,
+        "tipo": tipo,
+        "quantidade": quantidade,
+    }
+
+
+def encontrar_produto_por_nome(nome_extraido: str, produtos: list[dict]) -> dict | None:
+    nome_normalizado = normalizar_texto(nome_extraido)
+
+    for produto in produtos:
+        if normalizar_texto(produto["nome"]) == nome_normalizado:
+            return produto
+
+    for produto in produtos:
+        nome_produto = normalizar_texto(produto["nome"])
+        if nome_normalizado in nome_produto or nome_produto in nome_normalizado:
+            return produto
+
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -527,50 +811,12 @@ def listar_movimentacoes(_usuario: UsuarioOut = Depends(require_admin)):
 @app.post("/movimentacoes", response_model=MovimentacaoOut, status_code=201)
 def registrar_movimentacao(
     mov: MovimentacaoIn,
+    background_tasks: BackgroundTasks,
     usuario: UsuarioOut = Depends(get_current_user),
 ):
-    with get_db() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT * FROM produto WHERE id = %s", (mov.produto_id,))
-            produto = cursor.fetchone()
-
-            if produto is None:
-                raise HTTPException(status_code=404, detail="Produto nao encontrado.")
-
-            if mov.tipo == "entrada":
-                nova_qtd = produto["quantidade_atual"] + mov.quantidade
-            else:
-                nova_qtd = produto["quantidade_atual"] - mov.quantidade
-                if nova_qtd < 0:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=(
-                            f"Estoque insuficiente. "
-                            f"Disponivel: {produto['quantidade_atual']}, "
-                            f"solicitado: {mov.quantidade}."
-                        ),
-                    )
-
-            cursor.execute(
-                "UPDATE produto SET quantidade_atual = %s WHERE id = %s",
-                (nova_qtd, mov.produto_id),
-            )
-            cursor.execute(
-                """
-                INSERT INTO movimentacao (produto_id, usuario_id, tipo, quantidade)
-                VALUES (%s, %s, %s, %s)
-                """,
-                (mov.produto_id, usuario.id, mov.tipo, mov.quantidade),
-            )
-            cursor.execute(
-                """
-                SELECT id, produto_id, usuario_id, tipo, quantidade
-                FROM movimentacao
-                WHERE id = %s
-                """,
-                (cursor.lastrowid,),
-            )
-            return cursor.fetchone()
+    movimentacao = executar_movimentacao(mov, usuario)
+    background_tasks.add_task(verificar_alerta_estoque_baixo, mov.produto_id)
+    return movimentacao
 
 
 # ---------------------------------------------------------------------------
@@ -596,3 +842,102 @@ def listar_alertas(_usuario: UsuarioOut = Depends(get_current_user)):
                 """
             )
             return cursor.fetchall()
+
+
+# ---------------------------------------------------------------------------
+# Rotas - Inteligencia artificial
+# ---------------------------------------------------------------------------
+@app.get("/ia/previsao-ruptura", response_model=list[PrevisaoRupturaOut])
+def listar_previsao_ruptura(_usuario: UsuarioOut = Depends(get_current_user)):
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    p.id AS produto_id,
+                    p.nome AS produto_nome,
+                    p.quantidade_atual AS estoque_atual,
+                    COALESCE(SUM(
+                        CASE
+                            WHEN m.tipo = 'saida'
+                                AND m.criado_em >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+                            THEN m.quantidade
+                            ELSE 0
+                        END
+                    ), 0) AS saidas_7d
+                FROM produto p
+                LEFT JOIN movimentacao m ON m.produto_id = p.id
+                GROUP BY p.id, p.nome, p.quantidade_atual
+                ORDER BY p.id
+                """
+            )
+            previsoes = []
+
+            for row in cursor.fetchall():
+                media_diaria = round(float(row["saidas_7d"]) / 7, 2)
+                dias_para_esgotar = (
+                    None
+                    if media_diaria <= 0
+                    else round(row["estoque_atual"] / media_diaria, 1)
+                )
+                previsoes.append(
+                    {
+                        "produto_id": row["produto_id"],
+                        "produto_nome": row["produto_nome"],
+                        "estoque_atual": row["estoque_atual"],
+                        "media_vendas_diarias": media_diaria,
+                        "dias_para_esgotar": dias_para_esgotar,
+                    }
+                )
+
+            return previsoes
+
+
+@app.post("/ia/movimentacao-texto", response_model=MovimentacaoTextoOut)
+def registrar_movimentacao_por_texto(
+    payload: MovimentacaoTextoIn,
+    background_tasks: BackgroundTasks,
+    usuario: UsuarioOut = Depends(get_current_user),
+):
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT id, nome FROM produto ORDER BY nome")
+            produtos = cursor.fetchall()
+
+    if not produtos:
+        raise HTTPException(
+            status_code=400,
+            detail="Cadastre produtos antes de usar o assistente IA.",
+        )
+
+    extraido = validar_movimentacao_extraida(
+        chamar_ollama_para_movimentacao(payload.texto, produtos)
+    )
+    produto = encontrar_produto_por_nome(extraido["nome_produto"], produtos)
+
+    if produto is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Produto identificado pela IA nao foi encontrado no estoque: "
+                f"{extraido['nome_produto']}."
+            ),
+        )
+
+    movimentacao = executar_movimentacao(
+        MovimentacaoIn(
+            produto_id=produto["id"],
+            tipo=extraido["tipo"],
+            quantidade=extraido["quantidade"],
+        ),
+        usuario,
+    )
+    background_tasks.add_task(verificar_alerta_estoque_baixo, produto["id"])
+
+    return {
+        "produto_id": produto["id"],
+        "produto_nome": produto["nome"],
+        "tipo": extraido["tipo"],
+        "quantidade": extraido["quantidade"],
+        "movimentacao": movimentacao,
+    }
