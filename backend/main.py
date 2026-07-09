@@ -99,17 +99,34 @@ def init_db() -> None:
                 CREATE TABLE IF NOT EXISTS usuarios (
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     username VARCHAR(80) NOT NULL UNIQUE,
-                    password_hash VARCHAR(255) NOT NULL
+                    password_hash VARCHAR(255) NOT NULL,
+                    role ENUM('admin', 'operador') NOT NULL DEFAULT 'operador'
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """
             )
+            cursor.execute("SHOW COLUMNS FROM usuarios")
+            usuario_columns = {column["Field"] for column in cursor.fetchall()}
+
+            if "role" not in usuario_columns:
+                cursor.execute(
+                    "ALTER TABLE usuarios "
+                    "ADD COLUMN role ENUM('admin', 'operador') "
+                    "NOT NULL DEFAULT 'operador'"
+                )
+
+            cursor.execute(
+                "UPDATE usuarios SET role = 'admin' WHERE username = %s",
+                (ADMIN_USERNAME,),
+            )
+
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS produto (
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     nome VARCHAR(255) NOT NULL,
                     preco DECIMAL(10, 2) NOT NULL,
-                    quantidade_atual INT NOT NULL DEFAULT 0
+                    quantidade_atual INT NOT NULL DEFAULT 0,
+                    estoque_minimo INT NOT NULL DEFAULT 5
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """
             )
@@ -137,17 +154,27 @@ def init_db() -> None:
                     "MODIFY preco_venda DOUBLE NOT NULL DEFAULT 0"
                 )
 
+            if "estoque_minimo" not in produto_columns:
+                cursor.execute(
+                    "ALTER TABLE produto "
+                    "ADD COLUMN estoque_minimo INT NOT NULL DEFAULT 5"
+                )
+
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS movimentacao (
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     produto_id INT NOT NULL,
+                    usuario_id INT NULL,
                     tipo ENUM('entrada', 'saida') NOT NULL,
                     quantidade INT NOT NULL,
                     criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     CONSTRAINT fk_movimentacao_produto
                         FOREIGN KEY (produto_id) REFERENCES produto(id)
                         ON DELETE CASCADE,
+                    CONSTRAINT fk_movimentacao_usuario
+                        FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+                        ON DELETE SET NULL,
                     CONSTRAINT chk_movimentacao_quantidade
                         CHECK (quantidade > 0)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
@@ -171,14 +198,54 @@ def init_db() -> None:
                     "MODIFY valor_total DOUBLE NOT NULL DEFAULT 0"
                 )
 
+            if "usuario_id" not in movimentacao_columns:
+                cursor.execute(
+                    "ALTER TABLE movimentacao "
+                    "ADD COLUMN usuario_id INT NULL"
+                )
+
+            cursor.execute(
+                """
+                SELECT COUNT(*) AS total
+                FROM information_schema.TABLE_CONSTRAINTS
+                WHERE CONSTRAINT_SCHEMA = DATABASE()
+                    AND TABLE_NAME = 'movimentacao'
+                    AND CONSTRAINT_NAME = 'fk_movimentacao_usuario'
+                """
+            )
+            if cursor.fetchone()["total"] == 0:
+                cursor.execute(
+                    """
+                    ALTER TABLE movimentacao
+                    ADD CONSTRAINT fk_movimentacao_usuario
+                        FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+                        ON DELETE SET NULL
+                    """
+                )
+
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS alertas (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    produto_id INT NOT NULL,
+                    mensagem VARCHAR(500) NOT NULL,
+                    lido_boolean BOOLEAN NOT NULL DEFAULT FALSE,
+                    data_hora DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT fk_alerta_produto
+                        FOREIGN KEY (produto_id) REFERENCES produto(id)
+                        ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+
             cursor.execute("SELECT COUNT(*) AS total FROM usuarios")
             total_usuarios = cursor.fetchone()["total"]
 
             if total_usuarios == 0:
                 cursor.execute(
                     """
-                    INSERT INTO usuarios (username, password_hash)
-                    VALUES (%s, %s)
+                    INSERT INTO usuarios (username, password_hash, role)
+                    VALUES (%s, %s, 'admin')
                     """,
                     (ADMIN_USERNAME, pwd_context.hash(ADMIN_PASSWORD)),
                 )
@@ -205,17 +272,20 @@ class TokenOut(BaseModel):
 class UsuarioOut(BaseModel):
     id: int
     username: str
+    role: Literal["admin", "operador"]
 
 
 class ProdutoIn(BaseModel):
     nome: str = Field(..., min_length=1)
     preco: float = Field(..., gt=0)
     quantidade_atual: int = Field(0, ge=0)
+    estoque_minimo: int = Field(5, ge=0)
 
 
 class ProdutoUpdate(BaseModel):
     nome: str = Field(..., min_length=1)
     preco: float = Field(..., gt=0)
+    estoque_minimo: int | None = Field(None, ge=0)
 
 
 class ProdutoOut(BaseModel):
@@ -223,6 +293,7 @@ class ProdutoOut(BaseModel):
     nome: str
     preco: float
     quantidade_atual: int
+    estoque_minimo: int
 
 
 class MovimentacaoIn(BaseModel):
@@ -236,10 +307,21 @@ class MovimentacaoOut(BaseModel):
     produto_id: int
     tipo: str
     quantidade: int
+    usuario_id: int | None = None
 
 
 class MovimentacaoHistoricoOut(MovimentacaoOut):
     produto_nome: str
+    usuario_username: str | None = None
+    data_hora: str
+
+
+class AlertaOut(BaseModel):
+    id: int
+    produto_id: int
+    produto_nome: str
+    mensagem: str
+    lido_boolean: bool
     data_hora: str
 
 
@@ -251,6 +333,7 @@ def criar_token(usuario: dict) -> str:
     payload = {
         "sub": usuario["username"],
         "user_id": usuario["id"],
+        "role": usuario["role"],
         "exp": expires_at,
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
@@ -260,7 +343,11 @@ def buscar_usuario(username: str) -> dict | None:
     with get_db() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
-                "SELECT id, username, password_hash FROM usuarios WHERE username = %s",
+                """
+                SELECT id, username, password_hash, role
+                FROM usuarios
+                WHERE username = %s
+                """,
                 (username,),
             )
             return cursor.fetchone()
@@ -291,7 +378,21 @@ def get_current_user(
     if usuario is None:
         raise credentials_exception
 
-    return UsuarioOut(id=usuario["id"], username=usuario["username"])
+    return UsuarioOut(
+        id=usuario["id"],
+        username=usuario["username"],
+        role=usuario["role"],
+    )
+
+
+def require_admin(usuario: UsuarioOut = Depends(get_current_user)) -> UsuarioOut:
+    if usuario.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso restrito a administradores.",
+        )
+
+    return usuario
 
 
 @app.post("/login", response_model=TokenOut)
@@ -324,16 +425,21 @@ def listar_produtos(_usuario: UsuarioOut = Depends(get_current_user)):
 @app.post("/produtos", response_model=ProdutoOut, status_code=201)
 def cadastrar_produto(
     produto: ProdutoIn,
-    _usuario: UsuarioOut = Depends(get_current_user),
+    _usuario: UsuarioOut = Depends(require_admin),
 ):
     with get_db() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
                 """
-                INSERT INTO produto (nome, preco, quantidade_atual)
-                VALUES (%s, %s, %s)
+                INSERT INTO produto (nome, preco, quantidade_atual, estoque_minimo)
+                VALUES (%s, %s, %s, %s)
                 """,
-                (produto.nome, produto.preco, produto.quantidade_atual),
+                (
+                    produto.nome,
+                    produto.preco,
+                    produto.quantidade_atual,
+                    produto.estoque_minimo,
+                ),
             )
             cursor.execute(
                 "SELECT * FROM produto WHERE id = %s",
@@ -346,7 +452,7 @@ def cadastrar_produto(
 def editar_produto(
     produto_id: int,
     produto: ProdutoUpdate,
-    _usuario: UsuarioOut = Depends(get_current_user),
+    _usuario: UsuarioOut = Depends(require_admin),
 ):
     with get_db() as conn:
         with conn.cursor() as cursor:
@@ -356,9 +462,18 @@ def editar_produto(
             if atual is None:
                 raise HTTPException(status_code=404, detail="Produto nao encontrado.")
 
+            estoque_minimo = (
+                produto.estoque_minimo
+                if produto.estoque_minimo is not None
+                else atual["estoque_minimo"]
+            )
             cursor.execute(
-                "UPDATE produto SET nome = %s, preco = %s WHERE id = %s",
-                (produto.nome, produto.preco, produto_id),
+                """
+                UPDATE produto
+                SET nome = %s, preco = %s, estoque_minimo = %s
+                WHERE id = %s
+                """,
+                (produto.nome, produto.preco, estoque_minimo, produto_id),
             )
             cursor.execute("SELECT * FROM produto WHERE id = %s", (produto_id,))
             return cursor.fetchone()
@@ -367,7 +482,7 @@ def editar_produto(
 @app.delete("/produtos/{produto_id}", status_code=204)
 def excluir_produto(
     produto_id: int,
-    _usuario: UsuarioOut = Depends(get_current_user),
+    _usuario: UsuarioOut = Depends(require_admin),
 ):
     with get_db() as conn:
         with conn.cursor() as cursor:
@@ -386,7 +501,7 @@ def excluir_produto(
 # Rotas - Movimentacoes
 # ---------------------------------------------------------------------------
 @app.get("/movimentacoes", response_model=list[MovimentacaoHistoricoOut])
-def listar_movimentacoes(_usuario: UsuarioOut = Depends(get_current_user)):
+def listar_movimentacoes(_usuario: UsuarioOut = Depends(require_admin)):
     with get_db() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
@@ -397,9 +512,12 @@ def listar_movimentacoes(_usuario: UsuarioOut = Depends(get_current_user)):
                     COALESCE(p.nome, 'Produto removido') AS produto_nome,
                     m.tipo,
                     m.quantidade,
+                    m.usuario_id,
+                    u.username AS usuario_username,
                     DATE_FORMAT(m.criado_em, '%Y-%m-%d %H:%i:%s') AS data_hora
                 FROM movimentacao m
                 LEFT JOIN produto p ON p.id = m.produto_id
+                LEFT JOIN usuarios u ON u.id = m.usuario_id
                 ORDER BY m.id DESC
                 """
             )
@@ -409,7 +527,7 @@ def listar_movimentacoes(_usuario: UsuarioOut = Depends(get_current_user)):
 @app.post("/movimentacoes", response_model=MovimentacaoOut, status_code=201)
 def registrar_movimentacao(
     mov: MovimentacaoIn,
-    _usuario: UsuarioOut = Depends(get_current_user),
+    usuario: UsuarioOut = Depends(get_current_user),
 ):
     with get_db() as conn:
         with conn.cursor() as cursor:
@@ -439,13 +557,42 @@ def registrar_movimentacao(
             )
             cursor.execute(
                 """
-                INSERT INTO movimentacao (produto_id, tipo, quantidade)
-                VALUES (%s, %s, %s)
+                INSERT INTO movimentacao (produto_id, usuario_id, tipo, quantidade)
+                VALUES (%s, %s, %s, %s)
                 """,
-                (mov.produto_id, mov.tipo, mov.quantidade),
+                (mov.produto_id, usuario.id, mov.tipo, mov.quantidade),
             )
             cursor.execute(
-                "SELECT id, produto_id, tipo, quantidade FROM movimentacao WHERE id = %s",
+                """
+                SELECT id, produto_id, usuario_id, tipo, quantidade
+                FROM movimentacao
+                WHERE id = %s
+                """,
                 (cursor.lastrowid,),
             )
             return cursor.fetchone()
+
+
+# ---------------------------------------------------------------------------
+# Rotas - Alertas
+# ---------------------------------------------------------------------------
+@app.get("/alertas", response_model=list[AlertaOut])
+def listar_alertas(_usuario: UsuarioOut = Depends(get_current_user)):
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    a.id,
+                    a.produto_id,
+                    COALESCE(p.nome, 'Produto removido') AS produto_nome,
+                    a.mensagem,
+                    a.lido_boolean,
+                    DATE_FORMAT(a.data_hora, '%Y-%m-%d %H:%i:%s') AS data_hora
+                FROM alertas a
+                LEFT JOIN produto p ON p.id = a.produto_id
+                WHERE a.lido_boolean = FALSE
+                ORDER BY a.id DESC
+                """
+            )
+            return cursor.fetchall()
