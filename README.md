@@ -161,7 +161,7 @@ Depois inicie o MySQL no XAMPP novamente.
 No PowerShell:
 
 ```powershell
-cd C:\Users\arthu\.gemini\antigravity\scratch\GestorDeEstoque\backend
+cd C:\Users\arthu\Desktop\Arthur\Projetos\GestorDeEstoque\backend
 
 $env:MYSQL_HOST="127.0.0.1"
 $env:MYSQL_PORT="3306"
@@ -189,7 +189,7 @@ http://127.0.0.1:8000/docs
 Em outro terminal:
 
 ```powershell
-cd C:\Users\arthu\.gemini\antigravity\scratch\GestorDeEstoque\frontend
+cd C:\Users\arthu\Desktop\Arthur\Projetos\GestorDeEstoque\frontend
 npm.cmd install
 npm.cmd run dev
 ```
@@ -346,21 +346,21 @@ Essa verificacao nao bloqueia a resposta principal da rota.
 ### Build do frontend
 
 ```powershell
-cd C:\Users\arthu\.gemini\antigravity\scratch\GestorDeEstoque\frontend
+cd C:\Users\arthu\Desktop\Arthur\Projetos\GestorDeEstoque\frontend
 npm.cmd run build
 ```
 
 ### Lint do frontend
 
 ```powershell
-cd C:\Users\arthu\.gemini\antigravity\scratch\GestorDeEstoque\frontend
+cd C:\Users\arthu\Desktop\Arthur\Projetos\GestorDeEstoque\frontend
 npm.cmd run lint
 ```
 
 ### Validar sintaxe do backend
 
 ```powershell
-cd C:\Users\arthu\.gemini\antigravity\scratch\GestorDeEstoque\backend
+cd C:\Users\arthu\Desktop\Arthur\Projetos\GestorDeEstoque\backend
 .\.venv\Scripts\python.exe -m py_compile main.py
 ```
 

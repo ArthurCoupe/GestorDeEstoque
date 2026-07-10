@@ -11,6 +11,10 @@ build/
 # Node.js
 node_modules/
 npm-debug.log*
+*.log
+
+# Media captures
+*.mp4
 
 # SQLite
 *.db
