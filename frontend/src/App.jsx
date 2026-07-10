@@ -995,7 +995,13 @@ function FormMovimentacao({ produtos, onSaved }) {
   );
 }
 
-function DashboardEstoque({ estatisticas, isDarkMode, previsoes, produtos }) {
+function DashboardEstoque({
+  estatisticas,
+  isAdmin,
+  isDarkMode,
+  previsoes,
+  produtos,
+}) {
   const previsoesPorProdutoId = useMemo(
     () =>
       new Map(
@@ -1078,27 +1084,29 @@ function DashboardEstoque({ estatisticas, isDarkMode, previsoes, produtos }) {
 
   return (
     <div className="grid gap-5">
-      <section
-        aria-label="Indicadores comerciais"
-        className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
-      >
-        {kpisComerciais.map((kpi) => (
-          <div
-            className={`rounded-lg border p-5 shadow-sm ${kpi.classes}`}
-            key={kpi.label}
-          >
-            <p className="text-xs font-semibold uppercase tracking-wide">
-              {kpi.label}
-            </p>
-            <p className="mt-2 text-3xl font-semibold text-slate-950 dark:text-slate-100">
-              {kpi.value}
-            </p>
-            <p className="mt-1 text-sm font-medium text-slate-600 dark:text-slate-400">
-              {kpi.description}
-            </p>
-          </div>
-        ))}
-      </section>
+      {isAdmin && (
+        <section
+          aria-label="Indicadores comerciais"
+          className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
+        >
+          {kpisComerciais.map((kpi) => (
+            <div
+              className={`rounded-lg border p-5 shadow-sm ${kpi.classes}`}
+              key={kpi.label}
+            >
+              <p className="text-xs font-semibold uppercase tracking-wide">
+                {kpi.label}
+              </p>
+              <p className="mt-2 text-3xl font-semibold text-slate-950 dark:text-slate-100">
+                {kpi.value}
+              </p>
+              <p className="mt-1 text-sm font-medium text-slate-600 dark:text-slate-400">
+                {kpi.description}
+              </p>
+            </div>
+          ))}
+        </section>
+      )}
 
       <section className="grid gap-4 lg:grid-cols-[1fr_320px]">
         <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-900">
@@ -1145,7 +1153,7 @@ function DashboardEstoque({ estatisticas, isDarkMode, previsoes, produtos }) {
             )}
           </div>
 
-          {topProdutos.length > 0 && (
+          {isAdmin && topProdutos.length > 0 && (
             <div className="mt-5 overflow-x-auto">
               <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800">
                 <thead>
@@ -1156,15 +1164,19 @@ function DashboardEstoque({ estatisticas, isDarkMode, previsoes, produtos }) {
                     <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                       Estoque
                     </th>
-                    <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                      Preco de custo
-                    </th>
+                    {isAdmin && (
+                      <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                        Preco de custo
+                      </th>
+                    )}
                     <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                       Preco de venda
                     </th>
-                    <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                      Margem bruta
-                    </th>
+                    {isAdmin && (
+                      <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                        Margem bruta
+                      </th>
+                    )}
                     <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                       Previsao de esgotamento
                     </th>
@@ -1182,15 +1194,19 @@ function DashboardEstoque({ estatisticas, isDarkMode, previsoes, produtos }) {
                       <td className="whitespace-nowrap px-3 py-3 text-sm font-semibold text-slate-950 dark:text-slate-100">
                         {produto.quantidade}
                       </td>
-                      <td className="whitespace-nowrap px-3 py-3 text-sm text-slate-700 dark:text-slate-300">
-                        {currencyFormatter.format(produto.precoCusto)}
-                      </td>
+                      {isAdmin && (
+                        <td className="whitespace-nowrap px-3 py-3 text-sm text-slate-700 dark:text-slate-300">
+                          {currencyFormatter.format(produto.precoCusto)}
+                        </td>
+                      )}
                       <td className="whitespace-nowrap px-3 py-3 text-sm text-slate-700 dark:text-slate-300">
                         {currencyFormatter.format(produto.precoVenda)}
                       </td>
-                      <td className="whitespace-nowrap px-3 py-3 text-sm font-semibold text-emerald-700">
-                        {formatPercent(produto.margemBruta)}
-                      </td>
+                      {isAdmin && (
+                        <td className="whitespace-nowrap px-3 py-3 text-sm font-semibold text-emerald-700">
+                          {formatPercent(produto.margemBruta)}
+                        </td>
+                      )}
                       <td className="whitespace-nowrap px-3 py-3 text-sm text-slate-700 dark:text-slate-300">
                         {formatarPrevisao(previsoesPorProdutoId.get(produto.id))}
                       </td>
@@ -1203,20 +1219,22 @@ function DashboardEstoque({ estatisticas, isDarkMode, previsoes, produtos }) {
         </div>
 
         <aside className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
-          <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-              Patrimonio / estoque
-            </p>
-            <p className="mt-1 text-sm font-medium text-slate-500 dark:text-slate-400">
-              Valor investido parado
-            </p>
-            <p className="mt-2 text-3xl font-semibold text-slate-950 dark:text-slate-100">
-              {currencyFormatter.format(valorInvestidoEstoque)}
-            </p>
-            <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-              {produtos.length} produtos cadastrados
-            </p>
-          </div>
+          {isAdmin && (
+            <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                Patrimonio / estoque
+              </p>
+              <p className="mt-1 text-sm font-medium text-slate-500 dark:text-slate-400">
+                Valor investido parado
+              </p>
+              <p className="mt-2 text-3xl font-semibold text-slate-950 dark:text-slate-100">
+                {currencyFormatter.format(valorInvestidoEstoque)}
+              </p>
+              <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                {produtos.length} produtos cadastrados
+              </p>
+            </div>
+          )}
           <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
             <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
               Itens em estoque
@@ -1310,15 +1328,19 @@ function TabelaProdutos({ isAdmin, produtos, onDelete, onEdit }) {
                 <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                   Produto
                 </th>
-                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  Custo
-                </th>
+                {isAdmin && (
+                  <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    Custo
+                  </th>
+                )}
                 <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                   Venda
                 </th>
-                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  Margem
-                </th>
+                {isAdmin && (
+                  <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    Margem
+                  </th>
+                )}
                 <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                   Estoque
                 </th>
@@ -1347,15 +1369,19 @@ function TabelaProdutos({ isAdmin, produtos, onDelete, onEdit }) {
                     <td className="min-w-52 px-3 py-3 text-sm font-semibold text-slate-950 dark:text-slate-100">
                       {produto.nome}
                     </td>
-                    <td className="whitespace-nowrap px-3 py-3 text-sm text-slate-700 dark:text-slate-300">
-                      {currencyFormatter.format(produto.preco_custo)}
-                    </td>
+                    {isAdmin && (
+                      <td className="whitespace-nowrap px-3 py-3 text-sm text-slate-700 dark:text-slate-300">
+                        {currencyFormatter.format(produto.preco_custo)}
+                      </td>
+                    )}
                     <td className="whitespace-nowrap px-3 py-3 text-sm text-slate-700 dark:text-slate-300">
                       {currencyFormatter.format(produto.preco_venda)}
                     </td>
-                    <td className="whitespace-nowrap px-3 py-3 text-sm font-semibold text-emerald-700">
-                      {formatPercent(calcularMargemBruta(produto))}
-                    </td>
+                    {isAdmin && (
+                      <td className="whitespace-nowrap px-3 py-3 text-sm font-semibold text-emerald-700">
+                        {formatPercent(calcularMargemBruta(produto))}
+                      </td>
+                    )}
                     <td className="whitespace-nowrap px-3 py-3 text-sm font-semibold text-slate-950 dark:text-slate-100">
                       {produto.quantidade_atual}
                     </td>
@@ -1855,6 +1881,7 @@ function AssistenteIAModal({ onClose, onSaved }) {
   const speechTimeoutRef = useRef(null);
   const speechResultRef = useRef(false);
   const speechErrorRef = useRef(false);
+  const speechSuccessToastRef = useRef(false);
   const stopRequestedRef = useRef(false);
 
   function clearSpeechTimeout() {
@@ -1874,7 +1901,37 @@ function AssistenteIAModal({ onClose, onSaved }) {
     }
   }
 
-  function handleVoiceToggle() {
+  async function ensureMicrophoneAccess() {
+    if (
+      typeof navigator === "undefined" ||
+      !navigator.mediaDevices?.getUserMedia
+    ) {
+      return true;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((track) => track.stop());
+      return true;
+    } catch (err) {
+      speechErrorRef.current = true;
+
+      if (err?.name === "NotAllowedError" || err?.name === "SecurityError") {
+        toast.error("Permissao do microfone negada pelo navegador.");
+        return false;
+      }
+
+      if (err?.name === "NotFoundError" || err?.name === "DevicesNotFoundError") {
+        toast.error("Nenhum microfone foi encontrado neste dispositivo.");
+        return false;
+      }
+
+      toast.error("Nao foi possivel acessar o microfone.");
+      return false;
+    }
+  }
+
+  async function handleVoiceToggle() {
     if (isListening) {
       stopVoiceRecognition();
       return;
@@ -1893,11 +1950,12 @@ function AssistenteIAModal({ onClose, onSaved }) {
     recognitionRef.current = recognition;
     speechResultRef.current = false;
     speechErrorRef.current = false;
+    speechSuccessToastRef.current = false;
     stopRequestedRef.current = false;
 
     recognition.lang = "pt-BR";
-    recognition.continuous = false;
-    recognition.interimResults = false;
+    recognition.continuous = true;
+    recognition.interimResults = true;
     recognition.maxAlternatives = 1;
 
     recognition.onstart = () => {
@@ -1905,17 +1963,26 @@ function AssistenteIAModal({ onClose, onSaved }) {
     };
 
     recognition.onresult = (event) => {
-      speechResultRef.current = true;
-      const transcript = event.results?.[0]?.[0]?.transcript?.trim();
+      const resultados = Array.from(event.results ?? []);
+      const transcript = resultados
+        .map((result) => result?.[0]?.transcript ?? "")
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim();
+      const hasFinalResult = resultados.some((result) => result.isFinal);
 
       if (!transcript) {
-        speechErrorRef.current = true;
-        toast.error("Nao foi possivel entender o audio.");
         return;
       }
 
+      speechResultRef.current = true;
       setTexto(transcript);
-      toast.success("Texto capturado por voz.");
+
+      if (hasFinalResult && !speechSuccessToastRef.current) {
+        speechSuccessToastRef.current = true;
+        toast.success("Texto capturado por voz.");
+        recognition.stop();
+      }
     };
 
     recognition.onerror = (event) => {
@@ -1942,6 +2009,18 @@ function AssistenteIAModal({ onClose, onSaved }) {
         return;
       }
 
+      if (event.error === "network") {
+        toast.error(
+          "O servico de voz do navegador ficou indisponivel. Tente novamente no Chrome ou Edge atualizado.",
+        );
+        return;
+      }
+
+      if (event.error === "language-not-supported") {
+        toast.error("O navegador nao suporta reconhecimento em portugues.");
+        return;
+      }
+
       toast.error("Falha ao reconhecer a voz. Tente novamente.");
     };
 
@@ -1960,14 +2039,24 @@ function AssistenteIAModal({ onClose, onSaved }) {
     };
 
     try {
+      const hasMicrophoneAccess = await ensureMicrophoneAccess();
+
+      if (!hasMicrophoneAccess) {
+        recognitionRef.current = null;
+        return;
+      }
+
       recognition.start();
       speechTimeoutRef.current = window.setTimeout(() => {
         if (!speechResultRef.current) {
           speechErrorRef.current = true;
           toast.error("Nao foi possivel entender o audio no tempo limite.");
           recognition.abort();
+          return;
         }
-      }, 10000);
+
+        recognition.stop();
+      }, 20000);
     } catch {
       recognitionRef.current = null;
       setIsListening(false);
@@ -2262,13 +2351,31 @@ function ThemeToggleButton({ isDarkMode, onToggleTheme }) {
   );
 }
 
+function RoleSwitcher({ role, onRoleChange }) {
+  return (
+    <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+      <span>Visualizar como:</span>
+      <select
+        className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm font-semibold text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-cyan-500 dark:focus:ring-cyan-900/60"
+        value={role}
+        onChange={(event) => onRoleChange(event.target.value)}
+      >
+        <option value="admin">Administrador</option>
+        <option value="operador">Operador</option>
+      </select>
+    </label>
+  );
+}
+
 function AppHeader({
   alertas,
   isAdmin,
   isDarkMode,
   onLogout,
   onOpenAssistant,
+  onRoleChange,
   onToggleTheme,
+  role,
   user,
 }) {
   const visibleNavItems = navItems.filter(
@@ -2283,6 +2390,12 @@ function AppHeader({
       >
         Ir para o conteudo
       </a>
+
+      {!isAdmin && (
+        <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-sm font-semibold text-amber-800 dark:border-amber-900/70 dark:bg-amber-950/40 dark:text-amber-200">
+          Modo de Visualização: Operador (Dados financeiros e ações administrativas ocultos)
+        </div>
+      )}
 
       <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-5 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8">
         <div>
@@ -2321,6 +2434,7 @@ function AppHeader({
             isDarkMode={isDarkMode}
             onToggleTheme={onToggleTheme}
           />
+          <RoleSwitcher role={role} onRoleChange={onRoleChange} />
           {user && (
             <span className="inline-flex items-center rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
               {user.username} - {formatRole(user.role)}
@@ -2374,10 +2488,17 @@ function PageLayout({ children, erroGlobal, isLoadingDados }) {
   );
 }
 
-function DashboardPage({ estatisticas, isDarkMode, previsoes, produtos }) {
+function DashboardPage({
+  estatisticas,
+  isAdmin,
+  isDarkMode,
+  previsoes,
+  produtos,
+}) {
   return (
     <DashboardEstoque
       estatisticas={estatisticas}
+      isAdmin={isAdmin}
       isDarkMode={isDarkMode}
       previsoes={previsoes}
       produtos={produtos}
@@ -2436,6 +2557,7 @@ function AppRoutes({
           element={
             <DashboardPage
               estatisticas={estatisticasDashboard}
+              isAdmin={isAdmin}
               isDarkMode={isDarkMode}
               previsoes={previsoes}
               produtos={produtos}
@@ -2486,9 +2608,17 @@ export default function App() {
   const [produtoEditando, setProdutoEditando] = useState(null);
   const [produtoExcluindo, setProdutoExcluindo] = useState(null);
   const [produtos, setProdutos] = useState([]);
+  const [simulatedRole, setSimulatedRole] = useState("");
   const { isDarkMode, toggleTheme } = useTheme();
   const authUser = useMemo(() => decodeAuthToken(authToken), [authToken]);
-  const isAdmin = authUser?.role === "admin";
+  const authRole = authUser?.role ?? "admin";
+  const effectiveRole = simulatedRole || authRole;
+  const effectiveUser = useMemo(
+    () => (authUser ? { ...authUser, role: effectiveRole } : null),
+    [authUser, effectiveRole],
+  );
+  const isAdmin = effectiveRole === "admin";
+  const canAccessAdminApi = authRole === "admin";
 
   const handleLogout = useCallback(() => {
     clearAuthToken();
@@ -2498,6 +2628,7 @@ export default function App() {
     setPrevisoes([]);
     setEstatisticasDashboard(null);
     setMovimentacoes([]);
+    setSimulatedRole("");
     setErroGlobal("");
     toast.success("Sessao encerrada.");
   }, []);
@@ -2516,7 +2647,7 @@ export default function App() {
         obterEstatisticasDashboard(),
       ];
 
-      if (isAdmin) {
+      if (isAdmin && canAccessAdminApi) {
         requests.push(listarMovimentacoes());
       }
 
@@ -2532,7 +2663,7 @@ export default function App() {
       setAlertas(alertasData);
       setPrevisoes(previsoesData);
       setEstatisticasDashboard(estatisticasData);
-      setMovimentacoes(isAdmin ? movimentacoesData : []);
+      setMovimentacoes(isAdmin && canAccessAdminApi ? movimentacoesData : []);
       setErroGlobal("");
     } catch (err) {
       if (err.status === 401 || err.status === 403) {
@@ -2548,7 +2679,7 @@ export default function App() {
     } finally {
       setIsLoadingDados(false);
     }
-  }, [authToken, handleLogout, isAdmin]);
+  }, [authToken, canAccessAdminApi, handleLogout, isAdmin]);
 
   async function handleExcluirProduto(produto) {
     try {
@@ -2565,6 +2696,17 @@ export default function App() {
     carregar();
   }, [carregar]);
 
+  useEffect(() => {
+    setSimulatedRole(authRole);
+  }, [authRole]);
+
+  useEffect(() => {
+    if (!isAdmin) {
+      setProdutoEditando(null);
+      setProdutoExcluindo(null);
+    }
+  }, [isAdmin]);
+
   if (!authToken) {
     return <LoginPage onLogin={setAuthTokenState} />;
   }
@@ -2578,8 +2720,10 @@ export default function App() {
           isDarkMode={isDarkMode}
           onLogout={handleLogout}
           onOpenAssistant={() => setAssistenteAberto(true)}
+          onRoleChange={setSimulatedRole}
           onToggleTheme={toggleTheme}
-          user={authUser}
+          role={effectiveRole}
+          user={effectiveUser}
         />
 
         <AppRoutes
